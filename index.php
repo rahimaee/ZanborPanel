@@ -82,7 +82,6 @@ elseif ($user['step'] == 'select_plan') {
     $response = $sql->query("SELECT `name` FROM `category` WHERE `name` = '$text'")->num_rows;
     if ($response > 0) {
         step('confirm_service');
-        sendMessage($from_id, $texts['create_factor']);
         $location = file_get_contents("$from_id-location.txt");
         $plan = $text;
         $code = rand(111111, 999999);
@@ -91,13 +90,23 @@ elseif ($user['step'] == 'select_plan') {
         $limit = $fetch['limit'] ?? 0;
         $date = $fetch['date'] ?? 0;
         $sql->query("INSERT INTO `service_factors` (`from_id`, `location`, `protocol`, `plan`, `price`, `code`, `status`) VALUES ('$from_id', '$location', 'null', '$plan', '$price', '$code', 'active')");
+        // پیام فاکتور کامل
+        $factor_msg = "\xF0\x9F\x93\x81 فاکتور خرید سرویس شما صادر شد:\n\n".
+            "\xF0\x9F\x94\xB0 سرویس: <b>$plan</b>\n".
+            "\xF0\x9F\x8C\x8D لوکیشن: <b>$location</b>\n".
+            "\xF0\x9F\x93\x9A حجم: <b>$limit گیگ</b>\n".
+            "\xF0\x9F\x93\x85 مدت: <b>$date روز</b>\n".
+            "\xF0\x9F\x92\xB0 مبلغ: <b>".number_format($price)." تومان</b>\n".
+            "\xF0\x9F\x94\x8C کد پیگیری: <code>$code</code>\n\n".
+            "لطفا یکی از روش‌های پرداخت زیر را انتخاب کنید:";
+        sendMessage($from_id, $factor_msg, null, 'HTML');
         // دکمه‌های انتخاب روش پرداخت
         $pay_buttons = json_encode(['inline_keyboard' => [
             [['text' => '💰 پرداخت از کیف پول', 'callback_data' => 'pay_wallet-'.$code]],
             [['text' => '💳 پرداخت با زرین‌پال', 'callback_data' => 'pay_zarinpal-'.$code]],
             [['text' => '🏦 کارت‌به‌کارت', 'callback_data' => 'pay_card-'.$code]]
         ]]);
-        sendMessage($from_id, "لطفا یکی از روش‌های پرداخت زیر را انتخاب کنید:", $pay_buttons);
+        sendMessage($from_id, "یکی از روش‌های پرداخت را انتخاب کنید:", $pay_buttons);
     } else {
         sendMessage($from_id, $texts['choice_error']);
     }
@@ -135,19 +144,24 @@ elseif (strpos($data, 'pay_card-') === 0) {
     sendMessage($from_id, sprintf('لطفا مبلغ <b>%s</b> تومان را به شماره کارت زیر واریز کنید و رسید را ارسال نمایید:\n\nشماره کارت: <code>%s</code>\nبه نام: <b>%s</b>', number_format($service['price']), $card_number, $card_number_name), $back);
 }
 // دریافت رسید کارت به کارت
-elseif (strpos($user['step'], 'wait_card_receipt-') === 0 && isset($update->message->photo)) {
+elseif (strpos($user['step'], 'wait_card_receipt-') === 0 && (isset($update->message->photo) || isset($update->message->document) || isset($update->message->text))) {
     $code = explode('-', $user['step'])[1];
     $service = $sql->query("SELECT * FROM `orders` WHERE `code` = '$code'")->fetch_assoc();
-    // ارسال رسید به همه ادمین‌ها
     $admins = $sql->query("SELECT * FROM `admins`");
+    $caption = sprintf('رسید پرداخت کارت به کارت برای سفارش کد <code>%s</code>\nمبلغ: <b>%s</b> تومان\nاز کاربر: <code>%s</code>\nبرای تایید یا رد، دکمه زیر را بزنید.', $code, number_format($service['price']), $from_id);
+    $btns = json_encode(['inline_keyboard' => [
+        [['text' => '✅ تایید پرداخت', 'callback_data' => 'confirm_cardpay-'.$code.'-'.$from_id]],
+        [['text' => '❌ رد پرداخت', 'callback_data' => 'reject_cardpay-'.$code.'-'.$from_id]]
+    ]]);
     while ($admin = $admins->fetch_assoc()) {
         $admin_id = $admin['chat_id'];
-        $caption = sprintf('رسید پرداخت کارت به کارت برای سفارش کد <code>%s</code>\nمبلغ: <b>%s</b> تومان\nاز کاربر: <code>%s</code>\nبرای تایید یا رد، دکمه زیر را بزنید.', $code, number_format($service['price']), $from_id);
-        $btns = json_encode(['inline_keyboard' => [
-            [['text' => '✅ تایید پرداخت', 'callback_data' => 'confirm_cardpay-'.$code.'-'.$from_id]],
-            [['text' => '❌ رد پرداخت', 'callback_data' => 'reject_cardpay-'.$code.'-'.$from_id]]
-        ]]);
-        bot('sendPhoto', ['chat_id' => $admin_id, 'photo' => end($update->message->photo)->file_id, 'caption' => $caption, 'parse_mode' => 'html', 'reply_markup' => $btns]);
+        if (isset($update->message->photo)) {
+            bot('sendPhoto', ['chat_id' => $admin_id, 'photo' => end($update->message->photo)->file_id, 'caption' => $caption, 'parse_mode' => 'html', 'reply_markup' => $btns]);
+        } elseif (isset($update->message->document)) {
+            bot('sendDocument', ['chat_id' => $admin_id, 'document' => $update->message->document->file_id, 'caption' => $caption, 'parse_mode' => 'html', 'reply_markup' => $btns]);
+        } elseif (isset($update->message->text)) {
+            bot('sendMessage', ['chat_id' => $admin_id, 'text' => $caption."\n\nمتن رسید:\n".$update->message->text, 'parse_mode' => 'html', 'reply_markup' => $btns]);
+        }
     }
     sendMessage($from_id, 'رسید شما برای بررسی به مدیر ارسال شد. پس از تایید، سرویس برای شما فعال خواهد شد.');
     step('none');
@@ -2765,29 +2779,38 @@ if ($from_id == $config['dev'] or in_array($from_id, $admins)) {
             $sql->query("DELETE FROM `admins` WHERE `chat_id` = '$text'");
             sendMessage($from_id, "✅ کاربر <code>$text</code> با موفقیت از لیست ادمین ها حذف شد.", $manage_admin);
         } else {
-            sendMessage($from_id, "‼ کاربر <code>$text</code> عضو ربات نیست !", $back_panel);  
+            sendMessage($from_id, "‼ کاربر <code>$text</code> عضو ربات نیست !", $back_panel);
         }
-        
     }
     
-    elseif ($text == '⚙️ لیست ادمین ها') {
-        $res = $sql->query("SELECT * FROM `admins`");
-        if($res->num_rows == 0){
-            sendmessage($from_id, "❌ لیست ادمین های ربات خالی است.");
+    elseif ($text == '🕒 سفارش‌های در انتظار') {
+        // فقط ادمین‌ها بتوانند استفاده کنند
+        $is_admin = $sql->query("SELECT * FROM `admins` WHERE `chat_id` = '$from_id'")->num_rows > 0;
+        if (!$is_admin) {
+            sendMessage($from_id, 'دسترسی فقط برای ادمین‌ها مجاز است.');
             exit();
         }
-        while($row = $res->fetch_array()){
-            $key[] = [['text' => $row['chat_id'], 'callback_data' => 'delete_admin-'.$row['chat_id']]];
+        $orders = $sql->query("SELECT * FROM `orders` WHERE `status` = 'pending' ORDER BY row DESC LIMIT 20");
+        if ($orders->num_rows == 0) {
+            sendMessage($from_id, 'هیچ سفارش در انتظار تاییدی وجود ندارد.');
+        } else {
+            while ($order = $orders->fetch_assoc()) {
+                $user_info = $sql->query("SELECT * FROM `users` WHERE `from_id` = '{$order['from_id']}'")->fetch_assoc();
+                $msg = "\xF0\x9F\x93\x81 سفارش در انتظار تایید:\n".
+                    "\xF0\x9F\x94\x8C کد سفارش: <code>{$order['code']}</code>\n".
+                    "\xF0\x9F\x92\xB0 مبلغ: <b>".number_format($order['price'])." تومان</b>\n".
+                    "\xF0\x9F\x8C\x8D لوکیشن: <b>{$order['location']}</b>\n".
+                    "\xF0\x9F\x94\xB0 پلن: <b>{$order['plan']}</b>\n".
+                    "\xF0\x9F\x91\xA4 کاربر: <code>{$order['from_id']}</code>\n".
+                    "نام: <b>".($user_info['first_name'] ?? '-')."</b>\n".
+                    "یوزرنیم: <b>".($user_info['username'] ?? '-')."</b>\n";
+                $btns = json_encode(['inline_keyboard' => [
+                    [['text' => '✅ تایید', 'callback_data' => 'confirm_cardpay-'.$order['code'].'-'.$order['from_id']]],
+                    [['text' => '❌ رد', 'callback_data' => 'reject_cardpay-'.$order['code'].'-'.$order['from_id']]]
+                ]]);
+                sendMessage($from_id, $msg, $btns, 'HTML');
+            }
         }
-        $count = $res->num_rows;
-        $key = json_encode(['inline_keyboard' => $key]);
-        sendMessage($from_id, "🔰لیست ادمین های ربات به شرح زیر است :\n\n🔎 تعداد کل ادمین ها : <code>$count</code>", $key);
+        exit();
     }
 }
-
-/**
-* Project name: ZanborPanel
-* Channel: @ZanborPanel
-* Group: @ZanborPanelGap
- * Version: 2.5
-**/
