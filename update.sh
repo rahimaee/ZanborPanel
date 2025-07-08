@@ -63,7 +63,7 @@ do
                             rm -r /var/www/html/ZanborPanelBot/
                             colorized_echo green "\nAll file and folder deleted for update bot . . .\n"
 
-                            git clone https://github.com/ZanborPanel/ZanborPanel.git /var/www/html/ZanborPanelBot/
+                            git clone https://github.com/rahimaee/ZanborPanel.git /var/www/html/ZanborPanelBot/
                             sudo chmod -R 777 /var/www/html/ZanborPanelBot/
                             mv /var/www/html/zanbor.install /var/www/html/ZanborPanelBot/install/zanbor.install
                             sleep 2
