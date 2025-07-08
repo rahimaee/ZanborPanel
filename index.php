@@ -174,6 +174,25 @@ elseif (strpos($data, 'confirm_cardpay-') === 0) {
     list(, $code, $uid) = explode('-', $data);
     $order = $sql->query("SELECT * FROM `orders` WHERE `code` = '$code' AND `from_id` = '$uid' AND `status` = 'pending'")->fetch_assoc();
     if ($order) {
+        // --- رفع مشکل اطلاعات ناقص سفارش ---
+        $need_update = false;
+        if (empty($order['plan']) || empty($order['location'])) {
+            $service_factor = $sql->query("SELECT * FROM `service_factors` WHERE `code` = '$code' AND `from_id` = '$uid'")->fetch_assoc();
+            if ($service_factor) {
+                if (empty($order['plan']) && !empty($service_factor['plan'])) {
+                    $order['plan'] = $service_factor['plan'];
+                    $need_update = true;
+                }
+                if (empty($order['location']) && !empty($service_factor['location'])) {
+                    $order['location'] = $service_factor['location'];
+                    $need_update = true;
+                }
+                // سایر فیلدهای لازم را هم اضافه کن
+                if ($need_update) {
+                    $sql->query("UPDATE `orders` SET `plan` = '{$order['plan']}', `location` = '{$order['location']}' WHERE `code` = '$code' AND `from_id` = '$uid'");
+                }
+            }
+        }
         $user = $sql->query("SELECT * FROM `users` WHERE `from_id` = '$uid'")->fetch_assoc();
         $sql->query("UPDATE `orders` SET `status` = 'active' WHERE `code` = '$code'");
         finalizeOrderAndSendConfig($order, $user, $sql, $config);
@@ -314,6 +333,45 @@ elseif($user['step'] == 'confirm_service' and $text == '☑️ ایجاد سرو
         $xui = new Sanayi($panel['login_link'], $panel['token']);
         $san_setting = $sql->query("SELECT * FROM `sanayi_panel_setting` WHERE `code` = '{$panel['code']}'")->fetch_assoc();
         $create_service = $xui->addClient($name, $san_setting['inbound_id'], $date, $limit);
+        $create_status = json_decode($create_service, true);
+        
+        // بررسی خطاها
+        if ($create_status['status'] == false) {
+            sendMessage($from_id, sprintf($texts['create_error'], 1), $start_key);
+            return false;
+        }
+        
+        // ارسال لینک و subscription_url به کاربر
+        $getMe = json_decode(file_get_contents("https://api.telegram.org/bot{$config['token']}/getMe"), true);
+        $link = str_replace(['%s1', '%s2', '%s3'], [$create_status['results']['id'], str_replace(parse_url($panel['login_link'])['port'], json_decode($xui->getPortById($san_setting['inbound_id']), true)['port'], str_replace(['https://', 'http://'], ['', ''], $panel['login_link'])), $create_status['results']['remark']], $san_setting['example_link']);
+        
+        if ($panel['qr_code'] == 'active') {
+            $encode_url = urlencode($link);
+            bot('sendPhoto', ['chat_id' => $from_id, 'photo' => "https://api.qrserver.com/v1/create-qr-code/?data=$encode_url&size=800x800", 'caption' => sprintf($texts['success_create_service_sanayi'], $name, $location, $date, $limit, number_format($price), $link, $create_status['results']['subscribe'], '@' . $getMe['result']['username']), 'parse_mode' => 'html', 'reply_markup' => $start_key]);
+        } else {
+            sendMessage($from_id, sprintf($texts['success_create_service_sanayi'], $name, $location, $date, $limit, number_format($price), $link, $create_status['results']['subscribe'], '@' . $getMe['result']['username']), $start_key);
+        }
+        
+        // آپدیت سفارش با لینک
+        $sql->query("UPDATE `orders` SET `date` = '$date', `volume` = '$limit', `link` = '$link' WHERE `code` = '$code'");
+    }
+    
+    // آپدیت آمار کاربر
+    $sql->query("UPDATE `users` SET `count_service` = count_service + 1 WHERE `from_id` = '$from_id' LIMIT 1");
+    
+    return true;
+}
+
+// تابع تبدیل حجم به بایت
+function convertToBytes($size) {
+    $size = strtoupper($size);
+    $bytes = (int) $size;
+    if (strpos($size, 'KB') !== false) $bytes *= 1024;
+    elseif (strpos($size, 'MB') !== false) $bytes *= 1024 * 1024;
+    elseif (strpos($size, 'GB') !== false) $bytes *= 1024 * 1024 * 1024;
+    elseif (strpos($size, 'TB') !== false) $bytes *= 1024 * 1024 * 1024 * 1024;
+    return $bytes;
+}->addClient($name, $san_setting['inbound_id'], $date, $limit);
         $create_status = json_decode($create_service, true);
         # ---------------- check errors ---------------- #
         if ($create_status['status'] == false) {
@@ -2818,3 +2876,92 @@ if ($from_id == $config['dev'] or in_array($from_id, $admins)) {
         exit();
     }
 }
+
+// تابع نهایی‌سازی سفارش و ارسال کانفیگ
+function finalizeOrderAndSendConfig($order, $user, $sql, $config) {
+    global $texts, $start_key;
+    
+    $from_id = $order['from_id'];
+    $location = $order['location'];
+    $plan = $order['plan'];
+    $price = $order['price'];
+    $code = $order['code'];
+    
+    // دریافت اطلاعات پلن
+    $get_plan = $sql->query("SELECT * FROM `category` WHERE `name` = '$plan'");
+    if ($get_plan->num_rows == 0) {
+        sendMessage($from_id, sprintf($texts['create_error'], 0), $start_key);
+        return false;
+    }
+    
+    $get_plan_fetch = $get_plan->fetch_assoc();
+    $date = $get_plan_fetch['date'] ?? 0;
+    $limit = $get_plan_fetch['limit'] ?? 0;
+    
+    // دریافت اطلاعات سرور
+    $info_panel = $sql->query("SELECT * FROM `panels` WHERE `name` = '$location'");
+    if ($info_panel->num_rows == 0) {
+        sendMessage($from_id, sprintf($texts['create_error'], 2), $start_key);
+        return false;
+    }
+    
+    $panel = $info_panel->fetch_assoc();
+    $name = base64_encode($code) . '_' . $from_id;
+    
+    // ساخت سرویس بر اساس نوع پنل
+    if ($panel['type'] == 'marzban') {
+        // تنظیم پروکسی‌ها و inbound ها برای پنل marzban
+        $protocols = explode('|', $panel['protocols']);
+        unset($protocols[count($protocols)-1]);
+        if ($protocols[0] == '') unset($protocols[0]);
+        
+        $proxies = array();
+        foreach ($protocols as $protocol) {
+            if ($protocol == 'vless' && $panel['flow'] == 'flowon') {
+                $proxies[$protocol] = array('flow' => 'xtls-rprx-vision');
+            } else {
+                $proxies[$protocol] = array();
+            }
+        }
+        
+        $panel_inbounds = $sql->query("SELECT * FROM `marzban_inbounds` WHERE `panel` = '{$panel['code']}'");
+        $inbounds = array();
+        foreach ($protocols as $protocol) {
+            while ($row = $panel_inbounds->fetch_assoc()) {
+                $inbounds[$protocol][] = $row['inbound'];
+            }
+        }
+        
+        // ساخت سرویس
+        $token = loginPanel($panel['login_link'], $panel['username'], $panel['password'])['access_token'];
+        $create_service = createService($name, convertToBytes($limit.'GB'), strtotime("+ $date day"), $proxies, ($panel_inbounds->num_rows > 0) ? $inbounds : 'null', $token, $panel['login_link']);
+        $create_status = json_decode($create_service, true);
+        
+        // بررسی خطاها
+        if (!isset($create_status['username'])) {
+            sendMessage($from_id, sprintf($texts['create_error'], 1), $start_key);
+            return false;
+        }
+        
+        // ارسال لینک و subscription_url به کاربر
+        $links = "";
+        foreach ($create_status['links'] as $link) $links .= $link . "\n\n";
+        
+        $getMe = json_decode(file_get_contents("https://api.telegram.org/bot{$config['token']}/getMe"), true);
+        $subscribe = (strpos($create_status['subscription_url'], 'http') !== false) ? $create_status['subscription_url'] : $panel['login_link'] . $create_status['subscription_url'];
+        
+        if ($panel['qr_code'] == 'active') {
+            $encode_url = urlencode($subscribe);
+            bot('sendPhoto', ['chat_id' => $from_id, 'photo' => "https://api.qrserver.com/v1/create-qr-code/?data=$encode_url&size=800x800", 'caption' => sprintf($texts['success_create_service'], $name, $location, $date, $limit, number_format($price), $subscribe, '@' . $getMe['result']['username']), 'parse_mode' => 'html', 'reply_markup' => $start_key]);
+        } else {
+            sendMessage($from_id, sprintf($texts['success_create_service'], $name, $location, $date, $limit, number_format($price), $subscribe, '@' . $getMe['result']['username']), $start_key);
+        }
+        
+        // آپدیت سفارش با لینک‌ها
+        $sql->query("UPDATE `orders` SET `date` = '$date', `volume` = '$limit', `link` = '$links' WHERE `code` = '$code'");
+        
+    } elseif ($panel['type'] == 'sanayi') {
+        include_once 'api/sanayi.php';
+        $xui = new Sanayi($panel['login_link'], $panel['token']);
+        $san_setting = $sql->query("SELECT * FROM `sanayi_panel_setting` WHERE `code` = '{$panel['code']}'")->fetch_assoc();
+        $create_service = $xui
