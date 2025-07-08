@@ -100,13 +100,16 @@ elseif ($user['step'] == 'select_plan') {
             "\xF0\x9F\x94\x8C کد پیگیری: <code>$code</code>\n\n".
             "لطفا یکی از روش‌های پرداخت زیر را انتخاب کنید:";
         sendMessage($from_id, $factor_msg, null, 'HTML');
-        // دکمه‌های انتخاب روش پرداخت
-        $pay_buttons = json_encode(['inline_keyboard' => [
-            [['text' => '💰 پرداخت از کیف پول', 'callback_data' => 'pay_wallet-'.$code]],
-            [['text' => '💳 پرداخت با زرین‌پال', 'callback_data' => 'pay_zarinpal-'.$code]],
-            [['text' => '🏦 کارت‌به‌کارت', 'callback_data' => 'pay_card-'.$code]]
-        ]]);
-        sendMessage($from_id, "یکی از روش‌های پرداخت را انتخاب کنید:", $pay_buttons);
+        // دکمه‌های پرداخت فقط بر اساس درگاه‌های فعال
+        $payment_setting = $sql->query("SELECT * FROM `payment_setting`")->fetch_assoc();
+        $pay_buttons = [];
+        if ($payment_setting['card_status'] == 'active')
+            $pay_buttons[] = [['text' => '🏦 کارت‌به‌کارت', 'callback_data' => 'pay_card-'.$code]];
+        if ($payment_setting['zarinpal_status'] == 'active')
+            $pay_buttons[] = [['text' => '💳 پرداخت با زرین‌پال', 'callback_data' => 'pay_zarinpal-'.$code]];
+        // فقط اگر کیف پول فعال باشد (فرض بر این است همیشه فعال است)
+        $pay_buttons[] = [['text' => '💰 پرداخت از کیف پول', 'callback_data' => 'pay_wallet-'.$code]];
+        sendMessage($from_id, "یکی از روش‌های پرداخت را انتخاب کنید:", json_encode(['inline_keyboard' => $pay_buttons]));
     } else {
         sendMessage($from_id, $texts['choice_error']);
     }
@@ -119,10 +122,10 @@ elseif (strpos($data, 'pay_wallet-') === 0) {
         alert('❌ موجودی کیف پول شما کافی نیست. ابتدا حساب خود را شارژ کنید.');
     } else {
         // ثبت سفارش با pay_method = wallet
-        $sql->query("INSERT INTO `orders` (`from_id`, `location`, `protocol`, `date`, `volume`, `link`, `price`, `code`, `status`, `type`, `pay_method`) VALUES ('$from_id', '{$service['location']}', 'null', '0', '0', '', '{$service['price']}', '$code', 'active', 'marzban', 'wallet')");
-        $sql->query("UPDATE `users` SET `coin` = coin - {$service['price']}, `count_service` = count_service + 1 WHERE `from_id` = '$from_id' LIMIT 1");
-        // ارسال کانفیگ و پیام موفقیت (اینجا باید منطق ارسال کانفیگ را قرار دهید)
-        sendMessage($from_id, '✅ خرید با موفقیت انجام شد و کانفیگ برای شما ارسال شد.');
+        $sql->query("INSERT INTO `orders` (`from_id`, `location`, `protocol`, `date`, `volume`, `link`, `price`, `code`, `status`, `type`, `pay_method`, `plan`) VALUES ('$from_id', '{$service['location']}', 'null', '0', '0', '', '{$service['price']}', '$code', 'active', 'marzban', 'wallet', '{$service['plan']}')");
+        $sql->query("UPDATE `users` SET `coin` = coin - {$service['price']} WHERE `from_id` = '$from_id' LIMIT 1");
+        finalizeOrderAndSendConfig($sql->query("SELECT * FROM `orders` WHERE `code` = '$code'")->fetch_assoc(), $user, $sql, $config);
+        $sql->query("DELETE FROM `service_factors` WHERE `from_id` = '$from_id'");
     }
 }
 elseif (strpos($data, 'pay_zarinpal-') === 0) {
@@ -170,10 +173,11 @@ elseif (strpos($user['step'], 'wait_card_receipt-') === 0 && (isset($update->mes
 elseif (strpos($data, 'confirm_cardpay-') === 0) {
     list(, $code, $uid) = explode('-', $data);
     $order = $sql->query("SELECT * FROM `orders` WHERE `code` = '$code' AND `from_id` = '$uid'")->fetch_assoc();
+    $user = $sql->query("SELECT * FROM `users` WHERE `from_id` = '$uid'")->fetch_assoc();
     if ($order && $order['status'] == 'pending') {
         $sql->query("UPDATE `orders` SET `status` = 'active' WHERE `code` = '$code'");
-        // ارسال کانفیگ به کاربر (اینجا باید منطق ارسال کانفیگ را قرار دهید)
-        sendMessage($uid, '✅ پرداخت شما تایید شد و سرویس فعال گردید. کانفیگ برای شما ارسال شد.');
+        finalizeOrderAndSendConfig($order, $user, $sql, $config);
+        $sql->query("DELETE FROM `service_factors` WHERE `from_id` = '$uid'");
         alert('پرداخت تایید شد و سرویس فعال گردید.');
     } else {
         alert('این سفارش قبلاً تایید شده یا وجود ندارد.');
@@ -1075,7 +1079,7 @@ if ($from_id == $config['dev'] or in_array($from_id, $admins)) {
     
     elseif ($data == 'change_test_account_time') {
         step('change_test_account_time');
-        editMessage($from_id, "🆕 مقدار جدید را به صورت عدد صحیح ارسال کنید :", $message_id, $back_account_test);
+        editMessage($from_id, "🆕 مقدار جدید را به صورت عدد صحیح و درست ارسال کنید :", $message_id, $back_account_test);
     }
     
     elseif ($user['step'] == 'change_test_account_time') {
@@ -1092,7 +1096,7 @@ if ($from_id == $config['dev'] or in_array($from_id, $admins)) {
                 ]]);
                 sendMessage($from_id, "✅ عملیات تغییرات با موفقیت انجام شد.\n\n👇🏻 یکی از گزینه های زیر را انتخاب کنید .\n◽️@ZanborPanel", $manage_test_account);
             } else {
-                sendMessage($from_id, "❌ ورودی ارسالی اشتباه است !", $back_account_test);
+                sendMessage($from_id, "❌ عدد ارسالی شما اشتباه است !", $back_account_test);
             }
         }
     }
