@@ -74,13 +74,14 @@ mysqli_multi_query($sql, "CREATE TABLE IF NOT EXISTS `orders` (
     `code` varchar(20) COLLATE utf8mb4_bin NOT NULL,
     `status` varchar(15) COLLATE utf8mb4_bin NOT NULL,
     `type` varchar(20) COLLATE utf8mb4_bin NOT NULL,
-    `pay_method` varchar(50) COLLATE utf8mb4_bin DEFAULT 'wallet'
+    `pay_method` varchar(50) COLLATE utf8mb4_bin DEFAULT 'wallet',
+    `plan` varchar(100) COLLATE utf8mb4_bin DEFAULT NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;");
 
-// اضافه کردن ستون pay_method اگر قبلاً جدول ساخته شده باشد و این ستون وجود نداشته باشد
-$check_column = $sql->query("SHOW COLUMNS FROM `orders` LIKE 'pay_method'");
-if ($check_column->num_rows == 0) {
-    $sql->query("ALTER TABLE `orders` ADD COLUMN `pay_method` varchar(50) COLLATE utf8mb4_bin DEFAULT 'wallet'");
+// اضافه کردن ستون plan اگر قبلاً جدول ساخته شده باشد و این ستون وجود نداشته باشد
+$check_plan_column = $sql->query("SHOW COLUMNS FROM `orders` LIKE 'plan'");
+if ($check_plan_column->num_rows == 0) {
+    $sql->query("ALTER TABLE `orders` ADD COLUMN `plan` varchar(100) COLLATE utf8mb4_bin DEFAULT NULL");
 }
 
 mysqli_multi_query($sql, "CREATE TABLE IF NOT EXISTS `factors` (

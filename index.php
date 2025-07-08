@@ -133,7 +133,7 @@ elseif (strpos($data, 'pay_zarinpal-') === 0) {
     $service = $sql->query("SELECT * FROM `service_factors` WHERE `code` = '$code'")->fetch_assoc();
     // ساخت لینک زرین‌پال
     $pay_url = zarinpalGenerator($from_id, $service['price'], $code);
-    $sql->query("INSERT INTO `orders` (`from_id`, `location`, `protocol`, `date`, `volume`, `link`, `price`, `code`, `status`, `type`, `pay_method`) VALUES ('$from_id', '{$service['location']}', 'null', '0', '0', '', '{$service['price']}', '$code', 'pending', 'marzban', 'zarinpal')");
+    $sql->query("INSERT INTO `orders` (`from_id`, `location`, `protocol`, `date`, `volume`, `link`, `price`, `code`, `status`, `type`, `pay_method`, `plan`) VALUES ('$from_id', '{$service['location']}', 'null', '0', '0', '', '{$service['price']}', '$code', 'pending', 'marzban', 'zarinpal', '{$service['plan']}')");
     $pay_btn = json_encode(['inline_keyboard' => [[['text' => '💳 پرداخت آنلاین', 'url' => $pay_url]]]]);
     sendMessage($from_id, 'برای پرداخت روی دکمه زیر کلیک کنید:', $pay_btn);
 }
@@ -142,7 +142,7 @@ elseif (strpos($data, 'pay_card-') === 0) {
     $service = $sql->query("SELECT * FROM `service_factors` WHERE `code` = '$code'")->fetch_assoc();
     $card_number = $sql->query("SELECT `card_number` FROM `payment_setting`")->fetch_assoc()['card_number'];
     $card_number_name = $sql->query("SELECT `card_number_name` FROM `payment_setting`")->fetch_assoc()['card_number_name'];
-    $sql->query("INSERT INTO `orders` (`from_id`, `location`, `protocol`, `date`, `volume`, `link`, `price`, `code`, `status`, `type`, `pay_method`) VALUES ('$from_id', '{$service['location']}', 'null', '0', '0', '', '{$service['price']}', '$code', 'pending', 'marzban', 'card')");
+    $sql->query("INSERT INTO `orders` (`from_id`, `location`, `protocol`, `date`, `volume`, `link`, `price`, `code`, `status`, `type`, `pay_method`, `plan`) VALUES ('$from_id', '{$service['location']}', 'null', '0', '0', '', '{$service['price']}', '$code', 'pending', 'marzban', 'card', '{$service['plan']}')");
     step('wait_card_receipt-'.$code);
     sendMessage($from_id, sprintf('لطفا مبلغ <b>%s</b> تومان را به شماره کارت زیر واریز کنید و رسید را ارسال نمایید:\n\nشماره کارت: <code>%s</code>\nبه نام: <b>%s</b>', number_format($service['price']), $card_number, $card_number_name), $back);
 }
@@ -172,9 +172,9 @@ elseif (strpos($user['step'], 'wait_card_receipt-') === 0 && (isset($update->mes
 // تایید یا رد پرداخت توسط ادمین
 elseif (strpos($data, 'confirm_cardpay-') === 0) {
     list(, $code, $uid) = explode('-', $data);
-    $order = $sql->query("SELECT * FROM `orders` WHERE `code` = '$code' AND `from_id` = '$uid'")->fetch_assoc();
-    $user = $sql->query("SELECT * FROM `users` WHERE `from_id` = '$uid'")->fetch_assoc();
-    if ($order && $order['status'] == 'pending') {
+    $order = $sql->query("SELECT * FROM `orders` WHERE `code` = '$code' AND `from_id` = '$uid' AND `status` = 'pending'")->fetch_assoc();
+    if ($order) {
+        $user = $sql->query("SELECT * FROM `users` WHERE `from_id` = '$uid'")->fetch_assoc();
         $sql->query("UPDATE `orders` SET `status` = 'active' WHERE `code` = '$code'");
         finalizeOrderAndSendConfig($order, $user, $sql, $config);
         $sql->query("DELETE FROM `service_factors` WHERE `from_id` = '$uid'");
@@ -185,8 +185,8 @@ elseif (strpos($data, 'confirm_cardpay-') === 0) {
 }
 elseif (strpos($data, 'reject_cardpay-') === 0) {
     list(, $code, $uid) = explode('-', $data);
-    $order = $sql->query("SELECT * FROM `orders` WHERE `code` = '$code' AND `from_id` = '$uid'")->fetch_assoc();
-    if ($order && $order['status'] == 'pending') {
+    $order = $sql->query("SELECT * FROM `orders` WHERE `code` = '$code' AND `from_id` = '$uid' AND `status` = 'pending'")->fetch_assoc();
+    if ($order) {
         $sql->query("UPDATE `orders` SET `status` = 'rejected' WHERE `code` = '$code'");
         sendMessage($uid, '❌ پرداخت شما توسط مدیر تایید نشد. لطفا مجدداً تلاش کنید یا با پشتیبانی تماس بگیرید.');
         alert('پرداخت رد شد.');
