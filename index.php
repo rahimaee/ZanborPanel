@@ -92,14 +92,14 @@ elseif ($user['step'] == 'select_plan') {
         $sql->query("INSERT INTO `service_factors` (`from_id`, `location`, `protocol`, `plan`, `price`, `code`, `status`) VALUES ('$from_id', '$location', 'null', '$plan', '$price', '$code', 'active')");
         $payment_setting = $sql->query("SELECT * FROM `payment_setting`")->fetch_assoc();
         $pay_buttons = [];
-        if ($payment_setting['card_status'] == 'active') $pay_buttons[] = [['text' => '▫️کارت به کارت', 'callback_data' => 'kart_service-'.$code]];
-        if ($payment_setting['zarinpal_status'] == 'active') $pay_buttons[] = [['text' => '▫️زرین پال', 'callback_data' => 'zarinpal_service-'.$code]];
-        if ($payment_setting['idpay_status'] == 'active') $pay_buttons[] = [['text' => '▫️آیدی پی', 'callback_data' => 'idpay_service-'.$code]];
-        if ($payment_setting['nowpayment_status'] == 'active') $pay_buttons[] = [['text' => '▫️پرداخت ارزی', 'callback_data' => 'nowpayment_service-'.$code]];
-        $pay_buttons[] = [['text' => '💰 پرداخت با کیف پول', 'callback_data' => 'wallet_service-'.$code]];
-        $pay_buttons[] = [['text' => '🎁 کد تخفیف', 'callback_data' => 'use_copen-'.$code]];
-        $pay_buttons[] = [['text' => '❌ لغو عملیات', 'callback_data' => 'cancel_service_payment']];
-        $pay_markup = json_encode(['inline_keyboard' => $pay_buttons]);
+        if ($payment_setting['card_status'] == 'active') $pay_buttons[] = [['text' => 'کارت به کارت', 'callback_data' => 'kart-'.$code]];
+        if ($payment_setting['zarinpal_status'] == 'active') $pay_buttons[] = [['text' => 'زرین پال', 'callback_data' => 'zarinpal-'.$code]];
+        if ($payment_setting['idpay_status'] == 'active') $pay_buttons[] = [['text' => 'آیدی پی', 'callback_data' => 'idpay-'.$code]];
+        if ($payment_setting['nowpayment_status'] == 'active') $pay_buttons[] = [['text' => 'ارزی', 'callback_data' => 'nowpay-'.$code]];
+        $pay_buttons[] = [['text' => 'کیف پول', 'callback_data' => 'wallet-'.$code]];
+        $pay_buttons[] = [['text' => 'تخفیف', 'callback_data' => 'copen-'.$code]];
+        $pay_buttons[] = [['text' => 'لغو', 'callback_data' => 'cancel-'.$code]];
+        $pay_markup = json_encode(['inline_keyboard' => $pay_buttons], JSON_UNESCAPED_UNICODE);
         sendMessage($from_id, sprintf($texts['service_factor'], $location, $limit, $date, $code, number_format($price)), $pay_markup);
     } else {
         sendMessage($from_id, $texts['choice_error']);
@@ -1008,7 +1008,7 @@ if ($from_id == $config['dev'] or in_array($from_id, $admins)) {
     
     elseif ($data == 'change_test_account_time') {
         step('change_test_account_time');
-        editMessage($from_id, "🆕 مقدار جدید را به صورت عدد صحیح ارسال کنید :", $message_id, $back_account_test);
+        editMessage($from_id, "🆕 مقدار جدید را به صورت عدد صحیح و درست ارسال کنید :", $message_id, $back_account_test);
     }
     
     elseif ($user['step'] == 'change_test_account_time') {
@@ -1025,7 +1025,7 @@ if ($from_id == $config['dev'] or in_array($from_id, $admins)) {
                 ]]);
                 sendMessage($from_id, "✅ عملیات تغییرات با موفقیت انجام شد.\n\n👇🏻 یکی از گزینه های زیر را انتخاب کنید .\n◽️@ZanborPanel", $manage_test_account);
             } else {
-                sendMessage($from_id, "❌ ورودی ارسالی اشتباه است !", $back_account_test);
+                sendMessage($from_id, "❌ عدد ارسالی شما اشتباه است !", $back_account_test);
             }
         }
     }
