@@ -2833,11 +2833,43 @@ if ($from_id == $config['dev'] or in_array($from_id, $admins)) {
             sendMessage($from_id, $texts['not_coin'], $start_key);
         }
     }
-}
-
-/**
-* Project name: ZanborPanel
-* Channel: @ZanborPanel
-* Group: @ZanborPanelGap
- * Version: 2.5
-**/
+    // هندلر شارژ کیف پول (wallet_charge)
+    elseif (strpos($data, 'wallet_charge-') !== false) {
+        $code = explode('-', $data)[1];
+        $factor = $sql->query("SELECT * FROM `factors` WHERE `code` = '$code'")->fetch_assoc();
+        if ($factor && $factor['status'] == 'no') {
+            $sql->query("UPDATE `factors` SET `status` = 'yes' WHERE `code` = '$code'");
+            $sql->query("UPDATE `users` SET `coin` = coin + {$factor['price']}, `count_charge` = count_charge + 1 WHERE `from_id` = '{$factor['from_id']}'");
+            sendMessage($factor['from_id'], 'حساب شما با موفقیت شارژ شد.', $start_key);
+            // پاک کردن فاکتور
+            $sql->query("DELETE FROM `factors` WHERE `code` = '$code'");
+        } else {
+            sendMessage($from_id, 'این فاکتور قبلاً تایید شده یا وجود ندارد.');
+        }
+    }
+    // اصلاح فرآیند خرید سرویس با کیف پول (wallet-)
+    elseif (strpos($data, 'wallet-') !== false) {
+        $code = explode('-', $data)[1];
+        $service = $sql->query("SELECT * FROM `service_factors` WHERE `code` = '$code'")->fetch_assoc();
+        if ($service && $user['coin'] >= $service['price']) {
+            $sql->query("UPDATE `users` SET `coin` = coin - {$service['price']} WHERE `from_id` = '$from_id'");
+            // ساخت سرویس (منطق ساخت سرویس را از بخش بالا کپی می‌کنیم)
+            $location = $service['location'];
+            $plan = $service['plan'];
+            $price = $service['price'];
+            $code_service = $service['code'];
+            $name = base64_encode($code_service) . '_' . $from_id;
+            $get_plan = $sql->query("SELECT * FROM `category` WHERE `name` = '$plan'");
+            $get_plan_fetch = $get_plan->fetch_assoc();
+            $date = $get_plan_fetch['date'] ?? 0;
+            $limit = $get_plan_fetch['limit'] ?? 0;
+            $info_panel = $sql->query("SELECT * FROM `panels` WHERE `name` = '$location'");
+            $panel = $info_panel->fetch_assoc();
+            if ($panel['type'] == 'marzban') {
+                $protocols = explode('|', $panel['protocols']);
+                unset($protocols[count($protocols)-1]);
+                if ($protocols[0] == '') unset($protocols[0]);
+                $proxies = array();
+                foreach ($protocols as $protocol) {
+                    if ($protocol == 'vless' and $panel['flow'] == 'flowon'){
+                        $proxies[$protocol] = array('
