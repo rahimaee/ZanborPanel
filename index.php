@@ -90,13 +90,14 @@ elseif ($user['step'] == 'select_plan') {
         $limit = $fetch['limit'] ?? 0;
         $date = $fetch['date'] ?? 0;
         $sql->query("INSERT INTO `service_factors` (`from_id`, `location`, `protocol`, `plan`, `price`, `code`, `status`) VALUES ('$from_id', '$location', 'null', '$plan', '$price', '$code', 'active')");
-        // نمایش گزینه‌های پرداخت فعال
         $payment_setting = $sql->query("SELECT * FROM `payment_setting`")->fetch_assoc();
         $pay_buttons = [];
         if ($payment_setting['card_status'] == 'active') $pay_buttons[] = [['text' => '▫️کارت به کارت', 'callback_data' => 'kart_service-'.$code]];
         if ($payment_setting['zarinpal_status'] == 'active') $pay_buttons[] = [['text' => '▫️زرین پال', 'callback_data' => 'zarinpal_service-'.$code]];
         if ($payment_setting['idpay_status'] == 'active') $pay_buttons[] = [['text' => '▫️آیدی پی', 'callback_data' => 'idpay_service-'.$code]];
         if ($payment_setting['nowpayment_status'] == 'active') $pay_buttons[] = [['text' => '▫️پرداخت ارزی', 'callback_data' => 'nowpayment_service-'.$code]];
+        $pay_buttons[] = [['text' => '💰 پرداخت با کیف پول', 'callback_data' => 'wallet_service-'.$code]];
+        $pay_buttons[] = [['text' => '🎁 کد تخفیف', 'callback_data' => 'use_copen-'.$code]];
         $pay_buttons[] = [['text' => '❌ لغو عملیات', 'callback_data' => 'cancel_service_payment']];
         $pay_markup = json_encode(['inline_keyboard' => $pay_buttons]);
         sendMessage($from_id, sprintf($texts['service_factor'], $location, $limit, $date, $code, number_format($price)), $pay_markup);
@@ -1074,7 +1075,7 @@ if ($from_id == $config['dev'] or in_array($from_id, $admins)) {
         exit();
         // step('add_server_hedifay');
         // deleteMessage($from_id, $message_id);
-        // sendMessage($from_id, "‌👈🏻⁩ اسم پنل خود را به دلخواه ارسال کنید :↓\n\nمثال نام : 🇳🇱 - هلند\n• این اسم برای کاربران قابل نمایش است.", $cancel_add_server);
+        // sendMessage($from_id, "‌👈🏻 اسم پنل خود را به دلخواه ارسال کنید :↓\n\nمثال نام : 🇳🇱 - هلند\n• این اسم برای کاربران قابل نمایش است.", $cancel_add_server);
     }
 
     elseif ($user['step'] == 'add_server_hedifay') {
@@ -2726,6 +2727,26 @@ if ($from_id == $config['dev'] or in_array($from_id, $admins)) {
             [['text' => ($payment_setting['card_status'] == 'active') ? '🟢' : '🔴', 'callback_data' => 'change_status_card'], ['text' => '▫️کارت به کارت :', 'callback_data' => 'null']]
         ]]);
         sendMessage($from_id, '✏️ وضعیت خاموش/روشن درگاه پرداخت های ربات به شرح زیر است :', $manage_off_on_paymanet);
+    }
+    elseif (strpos($data, 'kart_service-') !== false) {
+        $code = explode('-', $data)[1];
+        $service = $sql->query("SELECT * FROM `service_factors` WHERE `code` = '$code'")->fetch_assoc();
+        $payment_setting = $sql->query("SELECT * FROM `payment_setting`")->fetch_assoc();
+        $card_number = $payment_setting['card_number'];
+        $card_number_name = $payment_setting['card_number_name'];
+        $sql->query("INSERT INTO `factors` (`from_id`, `price`, `code`, `status`) VALUES ('$from_id', '{$service['price']}', 'kart-$code', 'no')");
+        step('send_fish-kart-'.$code);
+        sendMessage($from_id, sprintf($texts['create_kart_factor'], 'kart-'.$code, number_format($service['price']), ($card_number != 'none') ? $card_number : '❌ تنظیم نشده', ($card_number_name != 'none') ? $card_number_name : ''), $back);
+    }
+    elseif (strpos($data, 'wallet_service-') !== false) {
+        $code = explode('-', $data)[1];
+        $service = $sql->query("SELECT * FROM `service_factors` WHERE `code` = '$code'")->fetch_assoc();
+        if ($user['coin'] >= $service['price']) {
+            // ساخت سرویس مستقیم از کیف پول
+            // ... (منطق ساخت سرویس مشابه پرداخت موفق) ...
+        } else {
+            sendMessage($from_id, $texts['not_coin'], $start_key);
+        }
     }
 }
 
