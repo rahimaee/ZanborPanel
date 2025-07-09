@@ -2572,6 +2572,22 @@ if ($from_id == $config['dev'] or in_array($from_id, $admins)) {
         sendMessage($factor['from_id'], 'مبلغ سفارش به کیف پول شما بازگردانده شد.');
         logToServerLog('kart_refund', 'بازگشت مبلغ کارت به کارت', ['code'=>$code, 'from_id'=>$factor['from_id']]);
     }
+    elseif ($data == 'change_status_card') {
+        $status = $sql->query("SELECT * FROM `payment_setting`")->fetch_assoc()['card_status'];
+        if ($status == 'active') {
+            $sql->query("UPDATE `payment_setting` SET `card_status` = 'inactive'");
+        } elseif ($status == 'inactive') {
+            $sql->query("UPDATE `payment_setting` SET `card_status` = 'active'");
+        }
+        $payment_setting = $sql->query("SELECT * FROM `payment_setting`")->fetch_assoc();
+        $manage_off_on_paymanet = json_encode(['inline_keyboard' => [
+            [['text' => ($payment_setting['zarinpal_status'] == 'active') ? '🟢' : '🔴', 'callback_data' => 'change_status_zarinpal'], ['text' => '▫️زرین پال :', 'callback_data' => 'null']],
+            [['text' => ($payment_setting['idpay_status'] == 'active') ? '🟢' : '🔴', 'callback_data' => 'change_status_idpay'], ['text' => '▫️آیدی پی :', 'callback_data' => 'null']],
+            [['text' => ($payment_setting['nowpayment_status'] == 'active') ? '🟢' : '🔴', 'callback_data' => 'change_status_nowpayment'], ['text' => ': nowpayment ▫️', 'callback_data' => 'null']],
+            [['text' => ($payment_setting['card_status'] == 'active') ? '��' : '🔴', 'callback_data' => 'change_status_card'], ['text' => '▫️کارت به کارت :', 'callback_data' => 'null']]
+        ]]);
+        editMessage($from_id, '✏️ وضعیت خاموش/روشن درگاه پرداخت های ربات به شرح زیر است :', $message_id, $manage_off_on_paymanet);
+    }
 }
 
 /**
