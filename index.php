@@ -2968,9 +2968,55 @@ function finalizeOrderAndSendConfig($order, $user, $sql, $config) {
         
         // آپدیت سفارش با لینک‌ها
         $sql->query("UPDATE `orders` SET `date` = '$date', `volume` = '$limit', `link` = '$links' WHERE `code` = '$code'");
-        
     } elseif ($panel['type'] == 'sanayi') {
         include_once 'api/sanayi.php';
         $xui = new Sanayi($panel['login_link'], $panel['token']);
         $san_setting = $sql->query("SELECT * FROM `sanayi_panel_setting` WHERE `code` = '{$panel['code']}'")->fetch_assoc();
-        $create_service = $xui
+        $create_service = $xui->addClient($name, $san_setting['inbound_id'], $date, $limit);
+        $create_status = json_decode($create_service, true);
+
+        // بررسی خطاها
+        if ($create_status['status'] == false) {
+            sendMessage($from_id, sprintf($texts['create_error'], 1), $start_key);
+            return false;
+        }
+
+        // ارسال لینک و subscription_url به کاربر
+        $getMe = json_decode(file_get_contents("https://api.telegram.org/bot{$config['token']}/getMe"), true);
+        $link = str_replace(
+            ['%s1', '%s2', '%s3'],
+            [
+                $create_status['results']['id'],
+                str_replace(
+                    parse_url($panel['login_link'])['port'],
+                    json_decode($xui->getPortById($san_setting['inbound_id']), true)['port'],
+                    str_replace(['https://', 'http://'], ['', ''], $panel['login_link'])
+                ),
+                $create_status['results']['remark']
+            ],
+            $san_setting['example_link']
+        );
+
+        if ($panel['qr_code'] == 'active') {
+            $encode_url = urlencode($link);
+            bot('sendPhoto', [
+                'chat_id' => $from_id,
+                'photo' => "https://api.qrserver.com/v1/create-qr-code/?data=$encode_url&size=800x800",
+                'caption' => sprintf($texts['success_create_service_sanayi'], $name, $location, $date, $limit, number_format($price), $link, $create_status['results']['subscribe'], '@' . $getMe['result']['username']),
+                'parse_mode' => 'html',
+                'reply_markup' => $start_key
+            ]);
+        } else {
+            sendMessage($from_id, sprintf($texts['success_create_service_sanayi'], $name, $location, $date, $limit, number_format($price), $link, $create_status['results']['subscribe'], '@' . $getMe['result']['username']), $start_key);
+        }
+
+        // آپدیت سفارش با لینک
+        $sql->query("UPDATE `orders` SET `date` = '$date', `volume` = '$limit', `link` = '$link' WHERE `code` = '$code'");
+    }
+
+    // افزایش تعداد سرویس کاربر
+    $sql->query("UPDATE `users` SET `count_service` = count_service + 1 WHERE `from_id` = '$from_id' LIMIT 1");
+
+    return true;
+}    
+   
