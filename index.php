@@ -2712,6 +2712,16 @@ if ($from_id == $config['dev'] or in_array($from_id, $admins)) {
         $sql->query("UPDATE `payment_setting` SET `zarinpal_token` = '$text'");
         sendMessage($from_id, "✅ با موفقیت تنظیم شد !", $manage_payment);
     }
+    elseif ($text == '✏️ وضعیت خاموش/روشن درگاه پرداخت های ربات') {
+        $payment_setting = $sql->query("SELECT * FROM `payment_setting`")->fetch_assoc();
+        $manage_off_on_paymanet = json_encode(['inline_keyboard' => [
+            [['text' => ($payment_setting['zarinpal_status'] == 'active') ? '🟢' : '🔴', 'callback_data' => 'change_status_zarinpal'], ['text' => '▫️زرین پال :', 'callback_data' => 'null']],
+            [['text' => ($payment_setting['idpay_status'] == 'active') ? '🟢' : '🔴', 'callback_data' => 'change_status_idpay'], ['text' => '▫️آیدی پی :', 'callback_data' => 'null']],
+            [['text' => ($payment_setting['nowpayment_status'] == 'active') ? '🟢' : '🔴', 'callback_data' => 'change_status_nowpayment'], ['text' => ': nowpayment ▫️', 'callback_data' => 'null']],
+            [['text' => ($payment_setting['card_status'] == 'active') ? '🟢' : '🔴', 'callback_data' => 'change_status_card'], ['text' => '▫️کارت به کارت :', 'callback_data' => 'null']]
+        ]]);
+        sendMessage($from_id, '✏️ وضعیت خاموش/روشن درگاه پرداخت های ربات به شرح زیر است :', $manage_off_on_paymanet);
+    }
 }
 
 /**
