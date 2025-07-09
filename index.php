@@ -187,17 +187,26 @@ elseif (strpos($data, 'confirm_cardpay-') === 0) {
                     $order['location'] = $service_factor['location'];
                     $need_update = true;
                 }
-                // سایر فیلدهای لازم را هم اضافه کن
                 if ($need_update) {
                     $sql->query("UPDATE `orders` SET `plan` = '{$order['plan']}', `location` = '{$order['location']}' WHERE `code` = '$code' AND `from_id` = '$uid'");
                 }
+            } else {
+                alert('❌ اطلاعات سفارش ناقص است و امکان تایید وجود ندارد. لطفا با پشتیبانی تماس بگیرید.');
+                sendMessage($uid, '❌ سفارش شما به دلیل نقص اطلاعات قابل تایید نیست. لطفا با پشتیبانی تماس بگیرید.');
+                return;
             }
         }
         $user = $sql->query("SELECT * FROM `users` WHERE `from_id` = '$uid'")->fetch_assoc();
         $sql->query("UPDATE `orders` SET `status` = 'active' WHERE `code` = '$code'");
-        finalizeOrderAndSendConfig($order, $user, $sql, $config);
-        $sql->query("DELETE FROM `service_factors` WHERE `from_id` = '$uid'");
-        alert('پرداخت تایید شد و سرویس فعال گردید.');
+        $finalize_result = finalizeOrderAndSendConfig($order, $user, $sql, $config);
+        if ($finalize_result === true) {
+            $sql->query("DELETE FROM `service_factors` WHERE `from_id` = '$uid'");
+            alert('پرداخت تایید شد و سرویس فعال گردید.');
+        } else {
+            $sql->query("UPDATE `orders` SET `status` = 'error' WHERE `code` = '$code'");
+            alert('❌ خطا در ساخت سرویس. سفارش به وضعیت خطا منتقل شد.');
+            sendMessage($uid, '❌ خطا در فعال‌سازی سرویس شما رخ داد. لطفا با پشتیبانی تماس بگیرید.');
+        }
     } else {
         alert('این سفارش قبلاً تایید شده یا وجود ندارد.');
     }
@@ -442,7 +451,7 @@ elseif ($text == '🎁 سرویس تستی (رایگان)' and $test_account_set
                     $sql->query("INSERT INTO `test_account` (`from_id`, `location`, `date`, `volume`, `link`, `price`, `code`, `status`) VALUES ('$from_id', '{$panel_fetch['name']}', '{$test_account_setting['date']}', '{$test_account_setting['volume']}', '$links', '0', '$code', 'active')");
                     deleteMessage($from_id, $message_id + 1);
                     sendMessage($from_id, sprintf($texts['create_test_account'], $test_account_setting['time'], $subscribe, $panel_fetch['name'], $test_account_setting['time'], $test_account_setting['volume'], base64_encode($code)), $start_key);
-                } else {
+            } else {
                     deleteMessage($from_id, $message_id + 1);
                     sendMessage($from_id, sprintf($texts['create_error'], 1), $start_key);
                 }
@@ -472,7 +481,7 @@ elseif ($text == '🎁 سرویس تستی (رایگان)' and $test_account_set
             sendMessage($config['dev'], $e);
         }
 
-    } else {
+        } else {
         sendMessage($from_id, $texts['already_test_account'], $start_key);
     }
 }
@@ -488,7 +497,7 @@ elseif ($text == '🛍 سرویس های من' or $data == 'back_services') {
         $key = json_encode(['inline_keyboard' => $key]);
         if (isset($text)) {
             sendMessage($from_id, sprintf($texts['my_services'], $services->num_rows), $key);
-        } else {
+    } else {
         	editMessage($from_id, sprintf($texts['my_services'], $services->num_rows), $message_id, $key);
         }
     } else {
