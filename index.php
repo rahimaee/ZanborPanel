@@ -2641,7 +2641,7 @@ if ($from_id == $config['dev'] or in_array($from_id, $admins)) {
             [['text' => ($payment_setting['zarinpal_status'] == 'active') ? '🟢' : '🔴', 'callback_data' => 'change_status_zarinpal'], ['text' => '▫️زرین پال :', 'callback_data' => 'null']],
             [['text' => ($payment_setting['idpay_status'] == 'active') ? '🟢' : '🔴', 'callback_data' => 'change_status_idpay'], ['text' => '▫️آیدی پی :', 'callback_data' => 'null']],
             [['text' => ($status == 'inactive') ? '🟢' : '🔴', 'callback_data' => 'change_status_nowpayment'], ['text' => ': nowpayment ▫️', 'callback_data' => 'null']],
-            [['text' => ($payment_setting['card_status'] == 'active') ? '��' : '🔴', 'callback_data' => 'change_status_card'], ['text' => '▫️کارت به کارت :', 'callback_data' => 'null']]
+            [['text' => ($payment_setting['card_status'] == 'active') ? '🟢' : '🔴', 'callback_data' => 'change_status_card'], ['text' => '▫️کارت به کارت :', 'callback_data' => 'null']]
         ]]);
         editMessage($from_id, "✏️ وضعیت خاموش/روشن درگاه پرداخت های ربات به شرح زیر است :", $message_id, $manage_off_on_paymanet);
     }
@@ -2662,6 +2662,55 @@ if ($from_id == $config['dev'] or in_array($from_id, $admins)) {
             [['text' => ($status == 'inactive') ? '🟢' : '🔴', 'callback_data' => 'change_status_card'], ['text' => '▫️کارت به کارت :', 'callback_data' => 'null']]
         ]]);
         editMessage($from_id, "✏️ وضعیت خاموش/روشن درگاه پرداخت های ربات به شرح زیر است :", $message_id, $manage_off_on_paymanet);
+    }
+    elseif ($text == '▫️تنظیم شماره کارت') {
+        step('set_card_number');
+        sendMessage($from_id, "🪪 لطفا شماره کارت خود را به صورت صحیح و دقیق ارسال کنید :", $back_panel);
+    }
+    elseif ($user['step'] == 'set_card_number') {
+        if (is_numeric($text)) {
+            step('none');
+            $sql->query("UPDATE `payment_setting` SET `card_number` = '$text'");
+            sendMessage($from_id, "✅ شماره کارت ارسالی شما با موفقیت تنظیم شد !\n\n◽️شماره کارت : <code>$text</code>", $manage_payment);
+        } else {
+            sendMessage($from_id, "❌ شماره کارت ارسالی شما اشتباه است !", $back_panel);
+        }
+    }
+    elseif ($text == '▫️تنظیم صاحب شماره کارت') {
+        step('set_card_number_name');
+        sendMessage($from_id, "#️⃣ نام صاحب کارت را به صورت دقیق و صحیح ارسال کنید :", $back_panel);
+    }
+    elseif ($user['step'] == 'set_card_number_name') {
+        step('none');
+        $sql->query("UPDATE `payment_setting` SET `card_number_name` = '$text'");
+        sendMessage($from_id, "✅ صاحب شماره کارت ارسالی شما با موفقیت تنظیم شد !\n\n◽صاحب ️شماره کارت : <code>$text</code>", $manage_payment);
+    }
+    elseif ($text == '◽ NOWPayments') {
+        step('set_nowpayment_token');
+        sendMessage($from_id, "🔎 لطفا api_key خود را ارسال کنید :", $back_panel);
+    }
+    elseif ($user['step'] == 'set_nowpayment_token') {
+        step('none');
+        $sql->query("UPDATE `payment_setting` SET `nowpayment_token` = '$text'");
+        sendMessage($from_id, "✅ با موفقیت تنظیم شد !", $manage_payment);
+    }
+    elseif ($text == '▫️آیدی پی') {
+        step('set_idpay_token');
+        sendMessage($from_id, "🔎 لطفا api_key آیدی پی خود را ارسال کنید :", $back_panel);
+    }
+    elseif ($user['step'] == 'set_idpay_token') {
+        step('none');
+        $sql->query("UPDATE `payment_setting` SET `idpay_token` = '$text'");
+        sendMessage($from_id, "✅ با موفقیت تنظیم شد !", $manage_payment);
+    }
+    elseif ($text == '▫️زرین پال') {
+        step('set_zarinpal_token');
+        sendMessage($from_id, "🔎 لطفا api_key زرین پال خود را ارسال کنید :", $back_panel);
+    }
+    elseif ($user['step'] == 'set_zarinpal_token') {
+        step('none');
+        $sql->query("UPDATE `payment_setting` SET `zarinpal_token` = '$text'");
+        sendMessage($from_id, "✅ با موفقیت تنظیم شد !", $manage_payment);
     }
 }
 
