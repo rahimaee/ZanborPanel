@@ -79,25 +79,30 @@ elseif ($user['step'] == 'buy_service') {
 }
 
 elseif ($user['step'] == 'select_plan') {
-	$response = $sql->query("SELECT `name` FROM `category` WHERE `name` = '$text'")->num_rows;
-	if ($response > 0) {
-    	step('confirm_service');
-    	sendMessage($from_id, $texts['create_factor'], $confirm_service);
-    	$location = file_get_contents("$from_id-location.txt");
-    	$plan = $text;
-    	$code = rand(111111, 999999);
-    	
-    	$fetch = $sql->query("SELECT * FROM `category` WHERE `name` = '$text'")->fetch_assoc();
-    	$price = $fetch['price'] ?? 0;
-    	$limit = $fetch['limit'] ?? 0;
-    	$date = $fetch['date'] ?? 0;
-    	
-    	$sql->query("INSERT INTO `service_factors` (`from_id`, `location`, `protocol`, `plan`, `price`, `code`, `status`) VALUES ('$from_id', '$location', 'null', '$plan', '$price', '$code', 'active')");
-    	$copen_key = json_encode(['inline_keyboard' => [[['text' => '🎁 کد تخفیف', 'callback_data' => 'use_copen-'.$code]]]]);
-    	sendMessage($from_id, sprintf($texts['service_factor'], $location, $limit, $date, $code, number_format($price)), $copen_key);
-	} else {
-	    sendMessage($from_id, $texts['choice_error']);
-	}
+    $response = $sql->query("SELECT `name` FROM `category` WHERE `name` = '$text'")->num_rows;
+    if ($response > 0) {
+        step('wait_payment');
+        $location = file_get_contents("$from_id-location.txt");
+        $plan = $text;
+        $code = rand(111111, 999999);
+        $fetch = $sql->query("SELECT * FROM `category` WHERE `name` = '$text'")->fetch_assoc();
+        $price = $fetch['price'] ?? 0;
+        $limit = $fetch['limit'] ?? 0;
+        $date = $fetch['date'] ?? 0;
+        $sql->query("INSERT INTO `service_factors` (`from_id`, `location`, `protocol`, `plan`, `price`, `code`, `status`) VALUES ('$from_id', '$location', 'null', '$plan', '$price', '$code', 'active')");
+        // نمایش گزینه‌های پرداخت فعال
+        $payment_setting = $sql->query("SELECT * FROM `payment_setting`")->fetch_assoc();
+        $pay_buttons = [];
+        if ($payment_setting['card_status'] == 'active') $pay_buttons[] = [['text' => '▫️کارت به کارت', 'callback_data' => 'kart_service-'.$code]];
+        if ($payment_setting['zarinpal_status'] == 'active') $pay_buttons[] = [['text' => '▫️زرین پال', 'callback_data' => 'zarinpal_service-'.$code]];
+        if ($payment_setting['idpay_status'] == 'active') $pay_buttons[] = [['text' => '▫️آیدی پی', 'callback_data' => 'idpay_service-'.$code]];
+        if ($payment_setting['nowpayment_status'] == 'active') $pay_buttons[] = [['text' => '▫️پرداخت ارزی', 'callback_data' => 'nowpayment_service-'.$code]];
+        $pay_buttons[] = [['text' => '❌ لغو عملیات', 'callback_data' => 'cancel_service_payment']];
+        $pay_markup = json_encode(['inline_keyboard' => $pay_buttons]);
+        sendMessage($from_id, sprintf($texts['service_factor'], $location, $limit, $date, $code, number_format($price)), $pay_markup);
+    } else {
+        sendMessage($from_id, $texts['choice_error']);
+    }
 }
 
 elseif ($data == 'cancel_copen') {
