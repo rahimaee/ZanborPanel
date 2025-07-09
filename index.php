@@ -79,148 +79,25 @@ elseif ($user['step'] == 'buy_service') {
 }
 
 elseif ($user['step'] == 'select_plan') {
-    $response = $sql->query("SELECT `name` FROM `category` WHERE `name` = '$text'")->num_rows;
-    if ($response > 0) {
-        step('confirm_service');
-        $location = file_get_contents("$from_id-location.txt");
-        $plan = $text;
-        $code = rand(111111, 999999);
-        $fetch = $sql->query("SELECT * FROM `category` WHERE `name` = '$text'")->fetch_assoc();
-        $price = $fetch['price'] ?? 0;
-        $limit = $fetch['limit'] ?? 0;
-        $date = $fetch['date'] ?? 0;
-        $sql->query("INSERT INTO `service_factors` (`from_id`, `location`, `protocol`, `plan`, `price`, `code`, `status`) VALUES ('$from_id', '$location', 'null', '$plan', '$price', '$code', 'active')");
-        // پیام فاکتور کامل
-        $factor_msg = "\xF0\x9F\x93\x81 فاکتور خرید سرویس شما صادر شد:\n\n".
-            "\xF0\x9F\x94\xB0 سرویس: <b>$plan</b>\n".
-            "\xF0\x9F\x8C\x8D لوکیشن: <b>$location</b>\n".
-            "\xF0\x9F\x93\x9A حجم: <b>$limit گیگ</b>\n".
-            "\xF0\x9F\x93\x85 مدت: <b>$date روز</b>\n".
-            "\xF0\x9F\x92\xB0 مبلغ: <b>".number_format($price)." تومان</b>\n".
-            "\xF0\x9F\x94\x8C کد پیگیری: <code>$code</code>\n\n".
-            "لطفا یکی از روش‌های پرداخت زیر را انتخاب کنید:";
-        sendMessage($from_id, $factor_msg, null, 'HTML');
-        // دکمه‌های پرداخت فقط بر اساس درگاه‌های فعال
-        $payment_setting = $sql->query("SELECT * FROM `payment_setting`")->fetch_assoc();
-        $pay_buttons = [];
-        if ($payment_setting['card_status'] == 'active')
-            $pay_buttons[] = [['text' => '🏦 کارت‌به‌کارت', 'callback_data' => 'pay_card-'.$code]];
-        if ($payment_setting['zarinpal_status'] == 'active')
-            $pay_buttons[] = [['text' => '💳 پرداخت با زرین‌پال', 'callback_data' => 'pay_zarinpal-'.$code]];
-        // فقط اگر کیف پول فعال باشد (فرض بر این است همیشه فعال است)
-        $pay_buttons[] = [['text' => '💰 پرداخت از کیف پول', 'callback_data' => 'pay_wallet-'.$code]];
-        sendMessage($from_id, "یکی از روش‌های پرداخت را انتخاب کنید:", json_encode(['inline_keyboard' => $pay_buttons]));
-    } else {
-        sendMessage($from_id, $texts['choice_error']);
-    }
-}
-
-elseif (strpos($data, 'pay_wallet-') === 0) {
-    $code = explode('-', $data)[1];
-    $service = $sql->query("SELECT * FROM `service_factors` WHERE `code` = '$code'")->fetch_assoc();
-    if ($user['coin'] < $service['price']) {
-        alert('❌ موجودی کیف پول شما کافی نیست. ابتدا حساب خود را شارژ کنید.');
-    } else {
-        // ثبت سفارش با pay_method = wallet
-        $sql->query("INSERT INTO `orders` (`from_id`, `location`, `protocol`, `date`, `volume`, `link`, `price`, `code`, `status`, `type`, `pay_method`, `plan`) VALUES ('$from_id', '{$service['location']}', 'null', '0', '0', '', '{$service['price']}', '$code', 'active', 'marzban', 'wallet', '{$service['plan']}')");
-        $sql->query("UPDATE `users` SET `coin` = coin - {$service['price']} WHERE `from_id` = '$from_id' LIMIT 1");
-        finalizeOrderAndSendConfig($sql->query("SELECT * FROM `orders` WHERE `code` = '$code'")->fetch_assoc(), $user, $sql, $config);
-        $sql->query("DELETE FROM `service_factors` WHERE `from_id` = '$from_id'");
-    }
-}
-elseif (strpos($data, 'pay_zarinpal-') === 0) {
-    $code = explode('-', $data)[1];
-    $service = $sql->query("SELECT * FROM `service_factors` WHERE `code` = '$code'")->fetch_assoc();
-    // ساخت لینک زرین‌پال
-    $pay_url = zarinpalGenerator($from_id, $service['price'], $code);
-    $sql->query("INSERT INTO `orders` (`from_id`, `location`, `protocol`, `date`, `volume`, `link`, `price`, `code`, `status`, `type`, `pay_method`, `plan`) VALUES ('$from_id', '{$service['location']}', 'null', '0', '0', '', '{$service['price']}', '$code', 'pending', 'marzban', 'zarinpal', '{$service['plan']}')");
-    $pay_btn = json_encode(['inline_keyboard' => [[['text' => '💳 پرداخت آنلاین', 'url' => $pay_url]]]]);
-    sendMessage($from_id, 'برای پرداخت روی دکمه زیر کلیک کنید:', $pay_btn);
-}
-elseif (strpos($data, 'pay_card-') === 0) {
-    $code = explode('-', $data)[1];
-    $service = $sql->query("SELECT * FROM `service_factors` WHERE `code` = '$code'")->fetch_assoc();
-    $card_number = $sql->query("SELECT `card_number` FROM `payment_setting`")->fetch_assoc()['card_number'];
-    $card_number_name = $sql->query("SELECT `card_number_name` FROM `payment_setting`")->fetch_assoc()['card_number_name'];
-    $sql->query("INSERT INTO `orders` (`from_id`, `location`, `protocol`, `date`, `volume`, `link`, `price`, `code`, `status`, `type`, `pay_method`, `plan`) VALUES ('$from_id', '{$service['location']}', 'null', '0', '0', '', '{$service['price']}', '$code', 'pending', 'marzban', 'card', '{$service['plan']}')");
-    step('wait_card_receipt-'.$code);
-    sendMessage($from_id, sprintf('لطفا مبلغ <b>%s</b> تومان را به شماره کارت زیر واریز کنید و رسید را ارسال نمایید:\n\nشماره کارت: <code>%s</code>\nبه نام: <b>%s</b>', number_format($service['price']), $card_number, $card_number_name), $back);
-}
-// دریافت رسید کارت به کارت
-elseif (strpos($user['step'], 'wait_card_receipt-') === 0 && (isset($update->message->photo) || isset($update->message->document) || isset($update->message->text))) {
-    $code = explode('-', $user['step'])[1];
-    $service = $sql->query("SELECT * FROM `orders` WHERE `code` = '$code'")->fetch_assoc();
-    $admins = $sql->query("SELECT * FROM `admins`");
-    $caption = sprintf('رسید پرداخت کارت به کارت برای سفارش کد <code>%s</code>\nمبلغ: <b>%s</b> تومان\nاز کاربر: <code>%s</code>\nبرای تایید یا رد، دکمه زیر را بزنید.', $code, number_format($service['price']), $from_id);
-    $btns = json_encode(['inline_keyboard' => [
-        [['text' => '✅ تایید پرداخت', 'callback_data' => 'confirm_cardpay-'.$code.'-'.$from_id]],
-        [['text' => '❌ رد پرداخت', 'callback_data' => 'reject_cardpay-'.$code.'-'.$from_id]]
-    ]]);
-    while ($admin = $admins->fetch_assoc()) {
-        $admin_id = $admin['chat_id'];
-        if (isset($update->message->photo)) {
-            bot('sendPhoto', ['chat_id' => $admin_id, 'photo' => end($update->message->photo)->file_id, 'caption' => $caption, 'parse_mode' => 'html', 'reply_markup' => $btns]);
-        } elseif (isset($update->message->document)) {
-            bot('sendDocument', ['chat_id' => $admin_id, 'document' => $update->message->document->file_id, 'caption' => $caption, 'parse_mode' => 'html', 'reply_markup' => $btns]);
-        } elseif (isset($update->message->text)) {
-            bot('sendMessage', ['chat_id' => $admin_id, 'text' => $caption."\n\nمتن رسید:\n".$update->message->text, 'parse_mode' => 'html', 'reply_markup' => $btns]);
-        }
-    }
-    sendMessage($from_id, 'رسید شما برای بررسی به مدیر ارسال شد. پس از تایید، سرویس برای شما فعال خواهد شد.');
-    step('none');
-}
-// تایید یا رد پرداخت توسط ادمین
-elseif (strpos($data, 'confirm_cardpay-') === 0) {
-    list(, $code, $uid) = explode('-', $data);
-    $order = $sql->query("SELECT * FROM `orders` WHERE `code` = '$code' AND `from_id` = '$uid' AND `status` = 'pending'")->fetch_assoc();
-    if ($order) {
-        // --- رفع مشکل اطلاعات ناقص سفارش ---
-        $need_update = false;
-        if (empty($order['plan']) || empty($order['location'])) {
-            $service_factor = $sql->query("SELECT * FROM `service_factors` WHERE `code` = '$code' AND `from_id` = '$uid'")->fetch_assoc();
-            if ($service_factor) {
-                if (empty($order['plan']) && !empty($service_factor['plan'])) {
-                    $order['plan'] = $service_factor['plan'];
-                    $need_update = true;
-                }
-                if (empty($order['location']) && !empty($service_factor['location'])) {
-                    $order['location'] = $service_factor['location'];
-                    $need_update = true;
-                }
-                if ($need_update) {
-                    $sql->query("UPDATE `orders` SET `plan` = '{$order['plan']}', `location` = '{$order['location']}' WHERE `code` = '$code' AND `from_id` = '$uid'");
-                }
-            } else {
-                alert('❌ اطلاعات سفارش ناقص است و امکان تایید وجود ندارد. لطفا با پشتیبانی تماس بگیرید.');
-                sendMessage($uid, '❌ سفارش شما به دلیل نقص اطلاعات قابل تایید نیست. لطفا با پشتیبانی تماس بگیرید.');
-                return;
-            }
-        }
-        $user = $sql->query("SELECT * FROM `users` WHERE `from_id` = '$uid'")->fetch_assoc();
-        $sql->query("UPDATE `orders` SET `status` = 'active' WHERE `code` = '$code'");
-        $finalize_result = finalizeOrderAndSendConfig($order, $user, $sql, $config);
-        if ($finalize_result === true) {
-            $sql->query("DELETE FROM `service_factors` WHERE `from_id` = '$uid'");
-            alert('پرداخت تایید شد و سرویس فعال گردید.');
-        } else {
-            $sql->query("UPDATE `orders` SET `status` = 'error' WHERE `code` = '$code'");
-            alert('❌ خطا در ساخت سرویس. سفارش به وضعیت خطا منتقل شد.');
-            sendMessage($uid, '❌ خطا در فعال‌سازی سرویس شما رخ داد. لطفا با پشتیبانی تماس بگیرید.');
-        }
-    } else {
-        alert('این سفارش قبلاً تایید شده یا وجود ندارد.');
-    }
-}
-elseif (strpos($data, 'reject_cardpay-') === 0) {
-    list(, $code, $uid) = explode('-', $data);
-    $order = $sql->query("SELECT * FROM `orders` WHERE `code` = '$code' AND `from_id` = '$uid' AND `status` = 'pending'")->fetch_assoc();
-    if ($order) {
-        $sql->query("UPDATE `orders` SET `status` = 'rejected' WHERE `code` = '$code'");
-        sendMessage($uid, '❌ پرداخت شما توسط مدیر تایید نشد. لطفا مجدداً تلاش کنید یا با پشتیبانی تماس بگیرید.');
-        alert('پرداخت رد شد.');
-    } else {
-        alert('این سفارش قبلاً بررسی شده یا وجود ندارد.');
-    }
+	$response = $sql->query("SELECT `name` FROM `category` WHERE `name` = '$text'")->num_rows;
+	if ($response > 0) {
+    	step('confirm_service');
+    	sendMessage($from_id, $texts['create_factor'], $confirm_service);
+    	$location = file_get_contents("$from_id-location.txt");
+    	$plan = $text;
+    	$code = rand(111111, 999999);
+    	
+    	$fetch = $sql->query("SELECT * FROM `category` WHERE `name` = '$text'")->fetch_assoc();
+    	$price = $fetch['price'] ?? 0;
+    	$limit = $fetch['limit'] ?? 0;
+    	$date = $fetch['date'] ?? 0;
+    	
+    	$sql->query("INSERT INTO `service_factors` (`from_id`, `location`, `protocol`, `plan`, `price`, `code`, `status`) VALUES ('$from_id', '$location', 'null', '$plan', '$price', '$code', 'active')");
+    	$copen_key = json_encode(['inline_keyboard' => [[['text' => '🎁 کد تخفیف', 'callback_data' => 'use_copen-'.$code]]]]);
+    	sendMessage($from_id, sprintf($texts['service_factor'], $location, $limit, $date, $code, number_format($price)), $copen_key);
+	} else {
+	    sendMessage($from_id, $texts['choice_error']);
+	}
 }
 
 elseif ($data == 'cancel_copen') {
@@ -343,45 +220,6 @@ elseif($user['step'] == 'confirm_service' and $text == '☑️ ایجاد سرو
         $san_setting = $sql->query("SELECT * FROM `sanayi_panel_setting` WHERE `code` = '{$panel['code']}'")->fetch_assoc();
         $create_service = $xui->addClient($name, $san_setting['inbound_id'], $date, $limit);
         $create_status = json_decode($create_service, true);
-        
-        // بررسی خطاها
-        if ($create_status['status'] == false) {
-            sendMessage($from_id, sprintf($texts['create_error'], 1), $start_key);
-            return false;
-        }
-        
-        // ارسال لینک و subscription_url به کاربر
-        $getMe = json_decode(file_get_contents("https://api.telegram.org/bot{$config['token']}/getMe"), true);
-        $link = str_replace(['%s1', '%s2', '%s3'], [$create_status['results']['id'], str_replace(parse_url($panel['login_link'])['port'], json_decode($xui->getPortById($san_setting['inbound_id']), true)['port'], str_replace(['https://', 'http://'], ['', ''], $panel['login_link'])), $create_status['results']['remark']], $san_setting['example_link']);
-        
-        if ($panel['qr_code'] == 'active') {
-            $encode_url = urlencode($link);
-            bot('sendPhoto', ['chat_id' => $from_id, 'photo' => "https://api.qrserver.com/v1/create-qr-code/?data=$encode_url&size=800x800", 'caption' => sprintf($texts['success_create_service_sanayi'], $name, $location, $date, $limit, number_format($price), $link, $create_status['results']['subscribe'], '@' . $getMe['result']['username']), 'parse_mode' => 'html', 'reply_markup' => $start_key]);
-        } else {
-            sendMessage($from_id, sprintf($texts['success_create_service_sanayi'], $name, $location, $date, $limit, number_format($price), $link, $create_status['results']['subscribe'], '@' . $getMe['result']['username']), $start_key);
-        }
-        
-        // آپدیت سفارش با لینک
-        $sql->query("UPDATE `orders` SET `date` = '$date', `volume` = '$limit', `link` = '$link' WHERE `code` = '$code'");
-    }
-    
-    // آپدیت آمار کاربر
-    $sql->query("UPDATE `users` SET `count_service` = count_service + 1 WHERE `from_id` = '$from_id' LIMIT 1");
-    
-    return true;
-}
-
-// تابع تبدیل حجم به بایت
-function convertToBytes($size) {
-    $size = strtoupper($size);
-    $bytes = (int) $size;
-    if (strpos($size, 'KB') !== false) $bytes *= 1024;
-    elseif (strpos($size, 'MB') !== false) $bytes *= 1024 * 1024;
-    elseif (strpos($size, 'GB') !== false) $bytes *= 1024 * 1024 * 1024;
-    elseif (strpos($size, 'TB') !== false) $bytes *= 1024 * 1024 * 1024 * 1024;
-    return $bytes;
-}->addClient($name, $san_setting['inbound_id'], $date, $limit);
-        $create_status = json_decode($create_service, true);
         # ---------------- check errors ---------------- #
         if ($create_status['status'] == false) {
             sendMessage($from_id, sprintf($texts['create_error'], 1), $start_key);
@@ -451,7 +289,7 @@ elseif ($text == '🎁 سرویس تستی (رایگان)' and $test_account_set
                     $sql->query("INSERT INTO `test_account` (`from_id`, `location`, `date`, `volume`, `link`, `price`, `code`, `status`) VALUES ('$from_id', '{$panel_fetch['name']}', '{$test_account_setting['date']}', '{$test_account_setting['volume']}', '$links', '0', '$code', 'active')");
                     deleteMessage($from_id, $message_id + 1);
                     sendMessage($from_id, sprintf($texts['create_test_account'], $test_account_setting['time'], $subscribe, $panel_fetch['name'], $test_account_setting['time'], $test_account_setting['volume'], base64_encode($code)), $start_key);
-            } else {
+                } else {
                     deleteMessage($from_id, $message_id + 1);
                     sendMessage($from_id, sprintf($texts['create_error'], 1), $start_key);
                 }
@@ -481,7 +319,7 @@ elseif ($text == '🎁 سرویس تستی (رایگان)' and $test_account_set
             sendMessage($config['dev'], $e);
         }
 
-        } else {
+    } else {
         sendMessage($from_id, $texts['already_test_account'], $start_key);
     }
 }
@@ -497,7 +335,7 @@ elseif ($text == '🛍 سرویس های من' or $data == 'back_services') {
         $key = json_encode(['inline_keyboard' => $key]);
         if (isset($text)) {
             sendMessage($from_id, sprintf($texts['my_services'], $services->num_rows), $key);
-    } else {
+        } else {
         	editMessage($from_id, sprintf($texts['my_services'], $services->num_rows), $message_id, $key);
         }
     } else {
@@ -1146,7 +984,7 @@ if ($from_id == $config['dev'] or in_array($from_id, $admins)) {
     
     elseif ($data == 'change_test_account_time') {
         step('change_test_account_time');
-        editMessage($from_id, "🆕 مقدار جدید را به صورت عدد صحیح و درست ارسال کنید :", $message_id, $back_account_test);
+        editMessage($from_id, "🆕 مقدار جدید را به صورت عدد صحیح ارسال کنید :", $message_id, $back_account_test);
     }
     
     elseif ($user['step'] == 'change_test_account_time') {
@@ -1163,7 +1001,7 @@ if ($from_id == $config['dev'] or in_array($from_id, $admins)) {
                 ]]);
                 sendMessage($from_id, "✅ عملیات تغییرات با موفقیت انجام شد.\n\n👇🏻 یکی از گزینه های زیر را انتخاب کنید .\n◽️@ZanborPanel", $manage_test_account);
             } else {
-                sendMessage($from_id, "❌ عدد ارسالی شما اشتباه است !", $back_account_test);
+                sendMessage($from_id, "❌ ورودی ارسالی اشتباه است !", $back_account_test);
             }
         }
     }
@@ -2850,173 +2688,29 @@ if ($from_id == $config['dev'] or in_array($from_id, $admins)) {
             $sql->query("DELETE FROM `admins` WHERE `chat_id` = '$text'");
             sendMessage($from_id, "✅ کاربر <code>$text</code> با موفقیت از لیست ادمین ها حذف شد.", $manage_admin);
         } else {
-            sendMessage($from_id, "‼ کاربر <code>$text</code> عضو ربات نیست !", $back_panel);
+            sendMessage($from_id, "‼ کاربر <code>$text</code> عضو ربات نیست !", $back_panel);  
         }
+        
     }
     
-    elseif ($text == '🕒 سفارش‌های در انتظار') {
-        // فقط ادمین‌ها بتوانند استفاده کنند
-        $is_admin = $sql->query("SELECT * FROM `admins` WHERE `chat_id` = '$from_id'")->num_rows > 0;
-        if (!$is_admin) {
-            sendMessage($from_id, 'دسترسی فقط برای ادمین‌ها مجاز است.');
+    elseif ($text == '⚙️ لیست ادمین ها') {
+        $res = $sql->query("SELECT * FROM `admins`");
+        if($res->num_rows == 0){
+            sendmessage($from_id, "❌ لیست ادمین های ربات خالی است.");
             exit();
         }
-        $orders = $sql->query("SELECT * FROM `orders` WHERE `status` = 'pending' ORDER BY row DESC LIMIT 20");
-        if ($orders->num_rows == 0) {
-            sendMessage($from_id, 'هیچ سفارش در انتظار تاییدی وجود ندارد.');
-        } else {
-            while ($order = $orders->fetch_assoc()) {
-                $user_info = $sql->query("SELECT * FROM `users` WHERE `from_id` = '{$order['from_id']}'")->fetch_assoc();
-                $msg = "\xF0\x9F\x93\x81 سفارش در انتظار تایید:\n".
-                    "\xF0\x9F\x94\x8C کد سفارش: <code>{$order['code']}</code>\n".
-                    "\xF0\x9F\x92\xB0 مبلغ: <b>".number_format($order['price'])." تومان</b>\n".
-                    "\xF0\x9F\x8C\x8D لوکیشن: <b>{$order['location']}</b>\n".
-                    "\xF0\x9F\x94\xB0 پلن: <b>{$order['plan']}</b>\n".
-                    "\xF0\x9F\x91\xA4 کاربر: <code>{$order['from_id']}</code>\n".
-                    "نام: <b>".($user_info['first_name'] ?? '-')."</b>\n".
-                    "یوزرنیم: <b>".($user_info['username'] ?? '-')."</b>\n";
-                $btns = json_encode(['inline_keyboard' => [
-                    [['text' => '✅ تایید', 'callback_data' => 'confirm_cardpay-'.$order['code'].'-'.$order['from_id']]],
-                    [['text' => '❌ رد', 'callback_data' => 'reject_cardpay-'.$order['code'].'-'.$order['from_id']]]
-                ]]);
-                sendMessage($from_id, $msg, $btns, 'HTML');
-            }
+        while($row = $res->fetch_array()){
+            $key[] = [['text' => $row['chat_id'], 'callback_data' => 'delete_admin-'.$row['chat_id']]];
         }
-        exit();
+        $count = $res->num_rows;
+        $key = json_encode(['inline_keyboard' => $key]);
+        sendMessage($from_id, "🔰لیست ادمین های ربات به شرح زیر است :\n\n🔎 تعداد کل ادمین ها : <code>$count</code>", $key);
     }
 }
 
-// تابع نهایی‌سازی سفارش و ارسال کانفیگ
-function finalizeOrderAndSendConfig($order, $user, $sql, $config) {
-    global $texts, $start_key;
-    
-    $from_id = $order['from_id'];
-    $location = $order['location'];
-    $plan = $order['plan'];
-    $price = $order['price'];
-    $code = $order['code'];
-    
-    // دریافت اطلاعات پلن
-    $get_plan = $sql->query("SELECT * FROM `category` WHERE `name` = '$plan'");
-    if ($get_plan->num_rows == 0) {
-        sendMessage($from_id, sprintf($texts['create_error'], 0), $start_key);
-        return false;
-    }
-    
-    $get_plan_fetch = $get_plan->fetch_assoc();
-    $date = $get_plan_fetch['date'] ?? 0;
-    $limit = $get_plan_fetch['limit'] ?? 0;
-    
-    // دریافت اطلاعات سرور
-    $info_panel = $sql->query("SELECT * FROM `panels` WHERE `name` = '$location'");
-    if ($info_panel->num_rows == 0) {
-        sendMessage($from_id, sprintf($texts['create_error'], 2), $start_key);
-        return false;
-    }
-    
-    $panel = $info_panel->fetch_assoc();
-    $name = base64_encode($code) . '_' . $from_id;
-    
-    // ساخت سرویس بر اساس نوع پنل
-    if ($panel['type'] == 'marzban') {
-        // تنظیم پروکسی‌ها و inbound ها برای پنل marzban
-        $protocols = explode('|', $panel['protocols']);
-        unset($protocols[count($protocols)-1]);
-        if ($protocols[0] == '') unset($protocols[0]);
-        
-        $proxies = array();
-        foreach ($protocols as $protocol) {
-            if ($protocol == 'vless' && $panel['flow'] == 'flowon') {
-                $proxies[$protocol] = array('flow' => 'xtls-rprx-vision');
-            } else {
-                $proxies[$protocol] = array();
-            }
-        }
-        
-        $panel_inbounds = $sql->query("SELECT * FROM `marzban_inbounds` WHERE `panel` = '{$panel['code']}'");
-        $inbounds = array();
-        foreach ($protocols as $protocol) {
-            while ($row = $panel_inbounds->fetch_assoc()) {
-                $inbounds[$protocol][] = $row['inbound'];
-            }
-        }
-        
-        // ساخت سرویس
-        $token = loginPanel($panel['login_link'], $panel['username'], $panel['password'])['access_token'];
-        $create_service = createService($name, convertToBytes($limit.'GB'), strtotime("+ $date day"), $proxies, ($panel_inbounds->num_rows > 0) ? $inbounds : 'null', $token, $panel['login_link']);
-        $create_status = json_decode($create_service, true);
-        
-        // بررسی خطاها
-        if (!isset($create_status['username'])) {
-            sendMessage($from_id, sprintf($texts['create_error'], 1), $start_key);
-            return false;
-        }
-        
-        // ارسال لینک و subscription_url به کاربر
-        $links = "";
-        foreach ($create_status['links'] as $link) $links .= $link . "\n\n";
-        
-        $getMe = json_decode(file_get_contents("https://api.telegram.org/bot{$config['token']}/getMe"), true);
-        $subscribe = (strpos($create_status['subscription_url'], 'http') !== false) ? $create_status['subscription_url'] : $panel['login_link'] . $create_status['subscription_url'];
-        
-        if ($panel['qr_code'] == 'active') {
-            $encode_url = urlencode($subscribe);
-            bot('sendPhoto', ['chat_id' => $from_id, 'photo' => "https://api.qrserver.com/v1/create-qr-code/?data=$encode_url&size=800x800", 'caption' => sprintf($texts['success_create_service'], $name, $location, $date, $limit, number_format($price), $subscribe, '@' . $getMe['result']['username']), 'parse_mode' => 'html', 'reply_markup' => $start_key]);
-        } else {
-            sendMessage($from_id, sprintf($texts['success_create_service'], $name, $location, $date, $limit, number_format($price), $subscribe, '@' . $getMe['result']['username']), $start_key);
-        }
-        
-        // آپدیت سفارش با لینک‌ها
-        $sql->query("UPDATE `orders` SET `date` = '$date', `volume` = '$limit', `link` = '$links' WHERE `code` = '$code'");
-    } elseif ($panel['type'] == 'sanayi') {
-        include_once 'api/sanayi.php';
-        $xui = new Sanayi($panel['login_link'], $panel['token']);
-        $san_setting = $sql->query("SELECT * FROM `sanayi_panel_setting` WHERE `code` = '{$panel['code']}'")->fetch_assoc();
-        $create_service = $xui->addClient($name, $san_setting['inbound_id'], $date, $limit);
-        $create_status = json_decode($create_service, true);
-
-        // بررسی خطاها
-        if ($create_status['status'] == false) {
-            sendMessage($from_id, sprintf($texts['create_error'], 1), $start_key);
-            return false;
-        }
-
-        // ارسال لینک و subscription_url به کاربر
-        $getMe = json_decode(file_get_contents("https://api.telegram.org/bot{$config['token']}/getMe"), true);
-        $link = str_replace(
-            ['%s1', '%s2', '%s3'],
-            [
-                $create_status['results']['id'],
-                str_replace(
-                    parse_url($panel['login_link'])['port'],
-                    json_decode($xui->getPortById($san_setting['inbound_id']), true)['port'],
-                    str_replace(['https://', 'http://'], ['', ''], $panel['login_link'])
-                ),
-                $create_status['results']['remark']
-            ],
-            $san_setting['example_link']
-        );
-
-        if ($panel['qr_code'] == 'active') {
-            $encode_url = urlencode($link);
-            bot('sendPhoto', [
-                'chat_id' => $from_id,
-                'photo' => "https://api.qrserver.com/v1/create-qr-code/?data=$encode_url&size=800x800",
-                'caption' => sprintf($texts['success_create_service_sanayi'], $name, $location, $date, $limit, number_format($price), $link, $create_status['results']['subscribe'], '@' . $getMe['result']['username']),
-                'parse_mode' => 'html',
-                'reply_markup' => $start_key
-            ]);
-        } else {
-            sendMessage($from_id, sprintf($texts['success_create_service_sanayi'], $name, $location, $date, $limit, number_format($price), $link, $create_status['results']['subscribe'], '@' . $getMe['result']['username']), $start_key);
-        }
-
-        // آپدیت سفارش با لینک
-        $sql->query("UPDATE `orders` SET `date` = '$date', `volume` = '$limit', `link` = '$link' WHERE `code` = '$code'");
-    }
-
-    // افزایش تعداد سرویس کاربر
-    $sql->query("UPDATE `users` SET `count_service` = count_service + 1 WHERE `from_id` = '$from_id' LIMIT 1");
-
-    return true;
-}    
-   
+/**
+* Project name: ZanborPanel
+* Channel: @ZanborPanel
+* Group: @ZanborPanelGap
+ * Version: 2.5
+**/
