@@ -485,6 +485,20 @@ function checkInbound($inbounds, $inbound) {
     return $found_inbound ? true : false;
 }
 
+function logToServerLog($type, $message, $extra = []) {
+    $ip = $_SERVER['REMOTE_ADDR'] ?? 'CLI';
+    $time = date('Y-m-d H:i:s');
+    $log = [
+        'time' => $time,
+        'ip' => $ip,
+        'type' => $type,
+        'message' => $message,
+        'extra' => $extra
+    ];
+    $logLine = json_encode($log, JSON_UNESCAPED_UNICODE) . "\n";
+    file_put_contents(__DIR__ . '/server.log', $logLine, FILE_APPEND | LOCK_EX);
+}
+
 # ----------------- [ <- keyboard -> ] ----------------- #
 
 if ($from_id == $config['dev']) {
