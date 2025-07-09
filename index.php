@@ -2477,7 +2477,7 @@ if ($from_id == $config['dev'] or in_array($from_id, $admins)) {
         $sql->query("UPDATE `factors` SET `status` = 'yes' WHERE `code` = '$code'");
         $sql->query("UPDATE `users` SET `coin` = coin + {$factor['price']}, `count_charge` = count_charge + 1 WHERE `from_id` = '{$factor['from_id']}'");
         logToServerLog('kart_accept', 'سفارش کارت به کارت تایید شد', ['code'=>$code, 'from_id'=>$factor['from_id']]);
-        // ارسال کانفیگ مشابه پرداخت موفق:
+        // ساخت سرویس و ارسال به کاربر
         $user_id = $factor['from_id'];
         $service_factor = $sql->query("SELECT * FROM `service_factors` WHERE `from_id` = '$user_id'")->fetch_assoc();
         if ($service_factor) {
@@ -2494,7 +2494,7 @@ if ($from_id == $config['dev'] or in_array($from_id, $admins)) {
             $panel = $info_panel->fetch_assoc();
             if ($get_plan->num_rows == 0) {
                 sendmessage($user_id, sprintf($texts['create_error'], 0), $start_key);
-                return;
+                exit();
             }
             if ($panel['type'] == 'marzban') {
                 $protocols = explode('|', $panel['protocols']);
@@ -2520,7 +2520,7 @@ if ($from_id == $config['dev'] or in_array($from_id, $admins)) {
                 $create_status = json_decode($create_service, true);
                 if (!isset($create_status['username'])) {
                     sendMessage($user_id, sprintf($texts['create_error'], 1), $start_key);
-                    return;
+                    exit();
                 }
                 $links = "";
                 foreach ($create_status['links'] as $link) $links .= $link . "\n\n";
@@ -2541,7 +2541,7 @@ if ($from_id == $config['dev'] or in_array($from_id, $admins)) {
                 $create_status = json_decode($create_service, true);
                 if ($create_status['status'] == false) {
                     sendMessage($user_id, sprintf($texts['create_error'], 1), $start_key);
-                    return;
+                    exit();
                 }
                 $getMe = json_decode(file_get_contents("https://api.telegram.org/bot{$config['token']}/getMe"), true);
                 $link = str_replace(['%s1', '%s2', '%s3'], [$create_status['results']['id'], str_replace(parse_url($panel['login_link'])['port'], json_decode($xui->getPortById($san_setting['inbound_id']), true)['port'], str_replace(['https://', 'http://'], ['', ''], $panel['login_link'])), $create_status['results']['remark']], $san_setting['example_link']);
@@ -2553,10 +2553,95 @@ if ($from_id == $config['dev'] or in_array($from_id, $admins)) {
                 }
                 $sql->query("INSERT INTO `orders` (`from_id`, `location`, `protocol`, `date`, `volume`, `link`, `price`, `code`, `status`, `type`) VALUES ('$user_id', '$location', 'null', '$date', '$limit', '$link', '$price', '$code_service', 'active', 'sanayi')");
             }
+            // پاک کردن فاکتور و سرویس فاکتور
             $sql->query("DELETE FROM `service_factors` WHERE `from_id` = '$user_id'");
-            $sql->query("UPDATE `users` SET `coin` = coin - $price, `count_service` = count_service + 1 WHERE `from_id` = '$user_id' LIMIT 1");
+            $sql->query("DELETE FROM `factors` WHERE `code` = '$code'");
         } else {
             sendMessage($user_id, 'سفارش شما قبلاً ثبت یا فعال شده است.');
+        }
+        sendMessage($user_id, $texts['success_admin_accept'], $start_key);
+    }
+    // هندلر پرداخت با کیف پول
+    elseif (strpos($data, 'wallet-') !== false) {
+        $code = explode('-', $data)[1];
+        $service = $sql->query("SELECT * FROM `service_factors` WHERE `code` = '$code'")->fetch_assoc();
+        if ($user['coin'] >= $service['price']) {
+            $sql->query("UPDATE `users` SET `coin` = coin - {$service['price']} WHERE `from_id` = '$from_id'");
+            // ساخت سرویس (منطق ساخت سرویس را از بخش بالا کپی می‌کنیم)
+            $location = $service['location'];
+            $plan = $service['plan'];
+            $price = $service['price'];
+            $code_service = $service['code'];
+            $name = base64_encode($code_service) . '_' . $from_id;
+            $get_plan = $sql->query("SELECT * FROM `category` WHERE `name` = '$plan'");
+            $get_plan_fetch = $get_plan->fetch_assoc();
+            $date = $get_plan_fetch['date'] ?? 0;
+            $limit = $get_plan_fetch['limit'] ?? 0;
+            $info_panel = $sql->query("SELECT * FROM `panels` WHERE `name` = '$location'");
+            $panel = $info_panel->fetch_assoc();
+            if ($panel['type'] == 'marzban') {
+                $protocols = explode('|', $panel['protocols']);
+                unset($protocols[count($protocols)-1]);
+                if ($protocols[0] == '') unset($protocols[0]);
+                $proxies = array();
+                foreach ($protocols as $protocol) {
+                    if ($protocol == 'vless' and $panel['flow'] == 'flowon'){
+                        $proxies[$protocol] = array('flow' => 'xtls-rprx-vision');
+                    } else {
+                        $proxies[$protocol] = array();
+                    }
+                }
+                $panel_inbounds = $sql->query("SELECT * FROM `marzban_inbounds` WHERE `panel` = '{$panel['code']}'");
+                $inbounds = array();
+                foreach ($protocols as $protocol) {
+                    while ($row = $panel_inbounds->fetch_assoc()) {
+                        $inbounds[$protocol][] = $row['inbound'];
+                    }
+                }
+                $token = loginPanel($panel['login_link'], $panel['username'], $panel['password'])['access_token'];
+                $create_service = createService($name, convertToBytes($limit.'GB'), strtotime("+ $date day"), $proxies, ($panel_inbounds->num_rows > 0) ? $inbounds : 'null', $token, $panel['login_link']);
+                $create_status = json_decode($create_service, true);
+                if (!isset($create_status['username'])) {
+                    sendMessage($from_id, sprintf($texts['create_error'], 1), $start_key);
+                    exit();
+                }
+                $links = "";
+                foreach ($create_status['links'] as $link) $links .= $link . "\n\n";
+                $getMe = json_decode(file_get_contents("https://api.telegram.org/bot{$config['token']}/getMe"), true);
+                $subscribe = (strpos($create_status['subscription_url'], 'http') !== false) ? $create_status['subscription_url'] : $panel['login_link'] . $create_status['subscription_url'];
+                if ($panel['qr_code'] == 'active') {
+                    $encode_url = urlencode($subscribe);
+                    bot('sendPhoto', ['chat_id' => $from_id, 'photo' => "https://api.qrserver.com/v1/create-qr-code/?data=$encode_url&size=800x800", 'caption' => sprintf($texts['success_create_service'], $name, $location, $date, $limit, number_format($price), $subscribe, '@' . $getMe['result']['username']), 'parse_mode' => 'html', 'reply_markup' => $start_key]);
+                } else {
+                    sendmessage($from_id, sprintf($texts['success_create_service'], $name, $location, $date, $limit, number_format($price), $subscribe, '@' . $getMe['result']['username']), $start_key);
+                }
+                $sql->query("INSERT INTO `orders` (`from_id`, `location`, `protocol`, `date`, `volume`, `link`, `price`, `code`, `status`, `type`) VALUES ('$from_id', '$location', 'null', '$date', '$limit', '$links', '$price', '$code_service', 'active', 'marzban')");
+            } elseif ($panel['type'] == 'sanayi') {
+                include_once 'api/sanayi.php';
+                $xui = new Sanayi($panel['login_link'], $panel['token']);
+                $san_setting = $sql->query("SELECT * FROM `sanayi_panel_setting` WHERE `code` = '{$panel['code']}'")->fetch_assoc();
+                $create_service = $xui->addClient($name, $san_setting['inbound_id'], $date, $limit);
+                $create_status = json_decode($create_service, true);
+                if ($create_status['status'] == false) {
+                    sendMessage($from_id, sprintf($texts['create_error'], 1), $start_key);
+                    exit();
+                }
+                $getMe = json_decode(file_get_contents("https://api.telegram.org/bot{$config['token']}/getMe"), true);
+                $link = str_replace(['%s1', '%s2', '%s3'], [$create_status['results']['id'], str_replace(parse_url($panel['login_link'])['port'], json_decode($xui->getPortById($san_setting['inbound_id']), true)['port'], str_replace(['https://', 'http://'], ['', ''], $panel['login_link'])), $create_status['results']['remark']], $san_setting['example_link']);
+                if ($panel['qr_code'] == 'active') {
+                    $encode_url = urlencode($link);
+                    bot('sendPhoto', ['chat_id' => $from_id, 'photo' => "https://api.qrserver.com/v1/create-qr-code/?data=$encode_url&size=800x800", 'caption' => sprintf($texts['success_create_service_sanayi'], $name, $location, $date, $limit, number_format($price), $link, $create_status['results']['subscribe'], '@' . $getMe['result']['username']), 'parse_mode' => 'html', 'reply_markup' => $start_key]);
+                } else {
+                    sendMessage($from_id, sprintf($texts['success_create_service_sanayi'], $name, $location, $date, $limit, number_format($price), $link, $create_status['results']['subscribe'], '@' . $getMe['result']['username']), $start_key);
+                }
+                $sql->query("INSERT INTO `orders` (`from_id`, `location`, `protocol`, `date`, `volume`, `link`, `price`, `code`, `status`, `type`) VALUES ('$from_id', '$location', 'null', '$date', '$limit', '$link', '$price', '$code_service', 'active', 'sanayi')");
+            }
+            // پاک کردن فاکتور و سرویس فاکتور
+            $sql->query("DELETE FROM `service_factors` WHERE `code` = '$code'");
+            $sql->query("DELETE FROM `factors` WHERE `code` = 'wallet-$code'");
+            sendMessage($from_id, $texts['success_create_service'], $start_key);
+        } else {
+            sendMessage($from_id, $texts['not_coin'], $start_key);
         }
     }
     elseif (strpos($data, 'cancel_kart-') !== false) {
